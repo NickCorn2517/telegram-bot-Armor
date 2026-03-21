@@ -5,10 +5,11 @@ from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, LabeledPrice, PreCheckoutQuery
 from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 BOT_TOKEN = "8791147608:AAFgE6MkWMT423RURwYut4YQC6N6N0dR2Us"
-PAYMENTS_TOKEN = "ВСТАВЬ_СЮДА"
+PAYMENTS_TOKEN = "ТВОЙ_ПЛАТЕЖНЫЙ_ТОКЕН"
 
 CHANNEL_ID = -1003620487067
 ADMIN_ID = 583554883
@@ -16,7 +17,12 @@ ADMIN_ID = 583554883
 PRICE = 1999  # в центах (19.99$)
 DAYS = 30
 
-bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+# ✅ ВАЖНО: вот так правильно в aiogram 3
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+
 dp = Dispatcher()
 
 
@@ -35,7 +41,10 @@ async def init_db():
 async def add_sub(user_id):
     expire = datetime.now() + timedelta(days=DAYS)
     async with aiosqlite.connect("subs.db") as db:
-        await db.execute("INSERT OR REPLACE INTO users VALUES (?, ?)", (user_id, expire.isoformat()))
+        await db.execute(
+            "INSERT OR REPLACE INTO users VALUES (?, ?)",
+            (user_id, expire.isoformat())
+        )
         await db.commit()
 
 
@@ -70,7 +79,7 @@ async def buy(message: Message):
 # --- ПОДТВЕРЖДЕНИЕ ПЛАТЕЖА ---
 @dp.pre_checkout_query()
 async def pre_checkout(pre_checkout_q: PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(pre_checkout_q.id, ok=True)
+    await pre_checkout_q.answer(ok=True)  # ✅ исправлено
 
 
 # --- УСПЕШНАЯ ОПЛАТА ---
