@@ -6,7 +6,7 @@ from aiogram.types import LabeledPrice
 
 BOT_TOKEN = "8791147608:AAFgE6MkWMT423RURwYut4YQC6N6N0dR2Us"
 PAYMENTS_TOKEN = "ВСТАВЬ_СЮДА"
-CHANNEL_ID = "@твой_канал"
+CHANNEL_ID = "-1003620487067"
 ADMIN_ID = 123456789
 
 PRICE = 1999
