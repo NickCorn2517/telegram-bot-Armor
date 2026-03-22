@@ -3,21 +3,24 @@ import aiosqlite
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, LabeledPrice, PreCheckoutQuery
-from aiogram.filters import Command
+from aiogram.types import (
+    Message, LabeledPrice, PreCheckoutQuery,
+    InlineKeyboardMarkup, InlineKeyboardButton
+)
+from aiogram.filters import CommandStart
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-BOT_TOKEN = "8791147608:AAFgE6MkWMT423RURwYut4YQC6N6N0dR2Us"
-PAYMENTS_TOKEN = "ТВОЙ_ПЛАТЕЖНЫЙ_ТОКЕН"
+from aiohttp import web
 
-CHANNEL_ID = -1003620487067
-ADMIN_ID = 583554883
+BOT_TOKEN = "TOKEN"
+PAYMENTS_TOKEN = "PAYMENT_TOKEN"
 
-PRICE = 1999  # в центах (19.99$)
+CHANNEL_ID = -100XXXXXXXXX
+
+PRICE = 1999
 DAYS = 30
 
-# ✅ ВАЖНО: вот так правильно в aiogram 3
 bot = Bot(
     token=BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -26,7 +29,7 @@ bot = Bot(
 dp = Dispatcher()
 
 
-# --- БАЗА ---
+# ================= БАЗА =================
 async def init_db():
     async with aiosqlite.connect("subs.db") as db:
         await db.execute("""
@@ -38,9 +41,35 @@ async def init_db():
         await db.commit()
 
 
-async def add_sub(user_id):
-    expire = datetime.now() + timedelta(days=DAYS)
+async def get_sub(user_id):
     async with aiosqlite.connect("subs.db") as db:
+        cur = await db.execute(
+            "SELECT expire_date FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cur.fetchone()
+        return row
+
+
+async def add_sub(user_id):
+    async with aiosqlite.connect("subs.db") as db:
+        cur = await db.execute(
+            "SELECT expire_date FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cur.fetchone()
+
+        now = datetime.now()
+
+        if row:
+            old_expire = datetime.fromisoformat(row[0])
+            if old_expire > now:
+                expire = old_expire + timedelta(days=DAYS)
+            else:
+                expire = now + timedelta(days=DAYS)
+        else:
+            expire = now + timedelta(days=DAYS)
+
         await db.execute(
             "INSERT OR REPLACE INTO users VALUES (?, ?)",
             (user_id, expire.isoformat())
@@ -48,61 +77,127 @@ async def add_sub(user_id):
         await db.commit()
 
 
-# --- СТАРТ ---
-@dp.message(Command("start"))
+# ================= КНОПКИ =================
+def main_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💳 Купить доступ", callback_data="buy")],
+        [InlineKeyboardButton(text="📅 Моя подписка", callback_data="my_sub")]
+    ])
+
+
+# ================= СТАРТ =================
+@dp.message(CommandStart())
 async def start(message: Message):
     await message.answer(
         "🔥 Доступ к приватному каналу\n\n"
-        "💰 Цена: 19.99$\n"
-        "⏳ Доступ: 30 дней\n\n"
-        "Нажми: /buy"
+        "💰 19.99$ / 30 дней",
+        reply_markup=main_kb()
     )
 
 
-# --- ПОКУПКА ---
-@dp.message(Command("buy"))
-async def buy(message: Message):
+# ================= КНОПКА КУПИТЬ =================
+@dp.callback_query(F.data == "buy")
+async def buy(callback):
     prices = [LabeledPrice(label="Подписка", amount=PRICE)]
 
     await bot.send_invoice(
-        chat_id=message.chat.id,
+        chat_id=callback.from_user.id,
         title="Доступ в канал",
         description="30 дней доступа",
         payload="sub",
         provider_token=PAYMENTS_TOKEN,
         currency="USD",
-        prices=prices,
-        start_parameter="buy"
+        prices=prices
     )
 
 
-# --- ПОДТВЕРЖДЕНИЕ ПЛАТЕЖА ---
+# ================= МОЯ ПОДПИСКА =================
+@dp.callback_query(F.data == "my_sub")
+async def my_sub(callback):
+    sub = await get_sub(callback.from_user.id)
+
+    if not sub:
+        await callback.message.answer("❌ У тебя нет подписки")
+        return
+
+    expire = datetime.fromisoformat(sub[0])
+
+    await callback.message.answer(
+        f"📅 Подписка до:\n<b>{expire}</b>"
+    )
+
+
+# ================= ПЛАТЕЖ =================
 @dp.pre_checkout_query()
-async def pre_checkout(pre_checkout_q: PreCheckoutQuery):
-    await pre_checkout_q.answer(ok=True)  # ✅ исправлено
+async def pre_checkout(q: PreCheckoutQuery):
+    await q.answer(ok=True)
 
 
-# --- УСПЕШНАЯ ОПЛАТА ---
 @dp.message(F.successful_payment)
 async def success_payment(message: Message):
     user_id = message.from_user.id
 
     await add_sub(user_id)
 
+    expire_date = datetime.now() + timedelta(minutes=10)
+
     link = await bot.create_chat_invite_link(
         chat_id=CHANNEL_ID,
-        member_limit=1
+        member_limit=1,
+        expire_date=expire_date
     )
 
     await message.answer(
         f"✅ Оплата прошла!\n\n"
-        f"Вот твоя ссылка:\n{link.invite_link}"
+        f"🔗 Ссылка (10 минут):\n{link.invite_link}"
     )
 
 
-# --- ЗАПУСК ---
+# ================= АВТО-КИК =================
+async def check_subs():
+    while True:
+        async with aiosqlite.connect("subs.db") as db:
+            cur = await db.execute("SELECT user_id, expire_date FROM users")
+            rows = await cur.fetchall()
+
+            now = datetime.now()
+
+            for user_id, expire in rows:
+                expire = datetime.fromisoformat(expire)
+
+                if expire < now:
+                    try:
+                        await bot.ban_chat_member(CHANNEL_ID, user_id)
+                        await bot.unban_chat_member(CHANNEL_ID, user_id)
+                    except:
+                        pass
+
+        await asyncio.sleep(60)
+
+
+# ================= АНТИ-СОН =================
+async def handle(request):
+    return web.Response(text="OK")
+
+
+async def start_web():
+    app = web.Application()
+    app.router.add_get("/", handle)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+
+
+# ================= ЗАПУСК =================
 async def main():
     await init_db()
+    await start_web()
+
+    asyncio.create_task(check_subs())
+
     await dp.start_polling(bot)
 
 
