@@ -89,8 +89,8 @@ def main_kb():
 @dp.message(CommandStart())
 async def start(message: Message):
     await message.answer(
-        "🔥 Доступ к приватному каналу\n\n"
-        "💰 19.99$ / 30 дней",
+        "🔥 Доступ к обучениюп\n\n"
+        "💰 999 / 30 дней",
         reply_markup=main_kb()
     )
 
