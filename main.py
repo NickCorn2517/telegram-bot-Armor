@@ -90,7 +90,7 @@ def main_kb():
 async def start(message: Message):
     await message.answer(
         "🔥 Доступ к обучению\n\n"
-        "💰 999/365 дней",
+        "💰 999   /  365 дней",
         reply_markup=main_kb()
     )
 
