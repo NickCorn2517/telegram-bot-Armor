@@ -18,7 +18,7 @@ PAYMENTS_TOKEN = "PAYMENT_TOKEN"
 
 CHANNEL_ID = -1003620487067
 
-PRICE = 999
+PRICE = 15 000
 DAYS = 365
 
 bot = Bot(
@@ -90,7 +90,7 @@ def main_kb():
 async def start(message: Message):
     await message.answer(
         "🔥 Доступ к обучению\n\n"
-        "💰 999   /  365 дней",
+        "💰 15 000  /  365 дней",
         reply_markup=main_kb()
     )
 
