@@ -88,12 +88,12 @@ def main_kb():
 # ================= СТАРТ =================
 @dp.message(CommandStart())
 async def start(message: Message):
-    await message.answer(
-        "🔥 Доступ к обучению\n\n"
-        "💰 15 000  /  365 дней",
-        reply_markup=main_kb()
-    )
-
+    await message.answer_photo(
+        photo="https://via.placeholder.com/800x400.png?text=VIP+Channel",
+        caption=(
+            "🔥 <b>Доступ к курсу обклейки</b>\n\n"
+            "💰 15000₽ / 365 дней\n"
+            "📈 Инсайды,
 
 # ================= КНОПКА КУПИТЬ =================
 @dp.callback_query(F.data == "buy")
