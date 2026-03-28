@@ -89,7 +89,7 @@ def main_kb():
 @dp.message(CommandStart())
 async def start(message: Message):
     await message.answer_photo(
-        photo="<a href="https://ibb.co/6d74ch0"><img src="https://i.ibb.co/jpPL9Kk/photo-2026-03-28-9-05-07-PM.jpg" alt="photo 2026 03 28 9 05 07 PM" border="0"></a>",
+        photo="https://ibb.co/6d74ch0",
         caption=(
             "🔥 <b>Доступ к курсу обклейки</b>\n\n"
             "💰 15000₽ / 365 дней\n"
