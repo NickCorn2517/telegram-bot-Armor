@@ -91,9 +91,12 @@ async def start(message: Message):
     await message.answer_photo(
         photo="https://ibb.co/6d74ch0",
         caption=(
-            "🔥 <b>Доступ к курсу обклейки</b>\n\n"
-            "💰 15000₽ / 365 дней\n"
-
+            "🔥 <b>Доступ к приватному каналу</b>\n\n"
+            "💰 199₽ / 30 дней\n"
+            "📈 Инсайды, сигналы, аналитика"
+        ),
+        reply_markup=main_kb()
+    )
 # ================= КНОПКА КУПИТЬ =================
 @dp.callback_query(F.data == "buy")
 async def buy(callback):
