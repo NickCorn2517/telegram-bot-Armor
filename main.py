@@ -93,7 +93,6 @@ async def start(message: Message):
         caption=(
             "🔥 <b>Доступ к курсу обклейки</b>\n\n"
             "💰 15000₽ / 365 дней\n"
-            "📈 Инсайды,
 
 # ================= КНОПКА КУПИТЬ =================
 @dp.callback_query(F.data == "buy")
