@@ -1,5 +1,6 @@
 import asyncio
 import os
+import logging
 from datetime import datetime, timedelta
 
 import asyncpg
@@ -19,6 +20,12 @@ from aiogram.types import (
     PreCheckoutQuery,
 )
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 # ================= НАСТРОЙКИ =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 PAYMENTS_TOKEN = os.getenv("PAYMENTS_TOKEN")
@@ -34,6 +41,7 @@ bot = Bot(
     token=BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
+
 dp = Dispatcher()
 db_pool: asyncpg.Pool | None = None
 
@@ -61,8 +69,14 @@ class UserStates(StatesGroup):
 async def init_db():
     global db_pool
 
+    logger.info("INIT_DB: start")
+
     if not DATABASE_URL:
+        logger.error("INIT_DB: DATABASE_URL is empty")
         raise RuntimeError("DATABASE_URL не задана в переменных окружения")
+
+    logger.info("INIT_DB: DATABASE_URL exists")
+    logger.info("INIT_DB: DATABASE_URL prefix = %s", DATABASE_URL[:15])
 
     db_pool = await asyncpg.create_pool(
         DATABASE_URL,
@@ -70,7 +84,12 @@ async def init_db():
         max_size=5,
     )
 
+    logger.info("INIT_DB: pool created")
+
     async with db_pool.acquire() as conn:
+        version = await conn.fetchval("SELECT version()")
+        logger.info("NEON OK: %s", version)
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
@@ -90,6 +109,8 @@ async def init_db():
                 status TEXT NOT NULL DEFAULT 'open'
             );
         """)
+
+    logger.info("INIT_DB: tables checked")
 
 
 async def get_sub(user_id: int):
@@ -804,28 +825,37 @@ async def admin_answer_send(message: Message, state: FSMContext):
 
 # ================= ФОНОВАЯ ПРОВЕРКА =================
 async def check_subs():
-    while True:
-        async with db_pool.acquire() as conn:
-            rows = await conn.fetch("SELECT user_id, expire_date FROM users")
+    logger.info("CHECK_SUBS: started")
 
-        now = datetime.now()
-        for row in rows:
-            if row["expire_date"] < now:
-                try:
-                    await bot.ban_chat_member(CHANNEL_ID, row["user_id"])
-                    await bot.unban_chat_member(CHANNEL_ID, row["user_id"])
-                except Exception:
-                    pass
+    while True:
+        try:
+            async with db_pool.acquire() as conn:
+                rows = await conn.fetch("SELECT user_id, expire_date FROM users")
+
+            now = datetime.now()
+            for row in rows:
+                if row["expire_date"] < now:
+                    try:
+                        await bot.ban_chat_member(CHANNEL_ID, row["user_id"])
+                        await bot.unban_chat_member(CHANNEL_ID, row["user_id"])
+                    except Exception:
+                        pass
+
+        except Exception as e:
+            logger.exception("CHECK_SUBS ERROR: %s", e)
 
         await asyncio.sleep(60)
 
 
 # ================= АНТИ-СОН =================
 async def handle(request):
+    logger.info("WEB: healthcheck hit")
     return web.Response(text="OK")
 
 
 async def start_web():
+    logger.info("WEB: start")
+
     app = web.Application()
     app.router.add_get("/", handle)
 
@@ -833,21 +863,40 @@ async def start_web():
     await runner.setup()
 
     port = int(os.getenv("PORT", 10000))
+    logger.info("WEB: binding port %s", port)
+
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
+
+    logger.info("WEB STARTED ON PORT %s", port)
 
 
 # ================= ЗАПУСК =================
 async def main():
+    logger.info("MAIN: start")
+
     if not BOT_TOKEN:
+        logger.error("MAIN: BOT_TOKEN is empty")
         raise RuntimeError("BOT_TOKEN не задан")
+
     if not PAYMENTS_TOKEN:
+        logger.error("MAIN: PAYMENTS_TOKEN is empty")
         raise RuntimeError("PAYMENTS_TOKEN не задан")
+
+    logger.info("MAIN: BOT_TOKEN exists = %s", bool(BOT_TOKEN))
+    logger.info("MAIN: PAYMENTS_TOKEN exists = %s", bool(PAYMENTS_TOKEN))
+    logger.info("MAIN: DATABASE_URL exists = %s", bool(DATABASE_URL))
 
     await init_db()
     await start_web()
+
+    logger.info("MAIN: starting background task check_subs")
     asyncio.create_task(check_subs())
+
+    logger.info("MAIN: deleting webhook")
     await bot.delete_webhook(drop_pending_updates=True)
+
+    logger.info("MAIN: start polling")
     await dp.start_polling(bot)
 
 
