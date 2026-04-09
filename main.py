@@ -108,7 +108,7 @@ async def buy(callback):
         description="30 дней доступа",
         payload="sub",
         provider_token=PAYMENTS_TOKEN,
-        currency="USD",
+        currency="RUB",
         prices=prices
     )
 
