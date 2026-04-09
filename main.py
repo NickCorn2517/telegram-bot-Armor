@@ -1,24 +1,28 @@
 import asyncio
-import aiosqlite
 import os
 from datetime import datetime, timedelta
 
+import asyncpg
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import (
-    Message, LabeledPrice, PreCheckoutQuery,
-    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-)
-from aiogram.filters import CommandStart, Command
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-
-from aiohttp import web
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LabeledPrice,
+    Message,
+    PreCheckoutQuery,
+)
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = "8791147608:AAFgE6MkWMT423RURwYut4YQC6N6N0dR2Us"
-PAYMENTS_TOKEN = "381764678:TEST:174936"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+PAYMENTS_TOKEN = os.getenv("PAYMENTS_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 CHANNEL_ID = -1003616232121
 ADMIN_ID = 583554883
@@ -30,8 +34,8 @@ bot = Bot(
     token=BOT_TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-
 dp = Dispatcher()
+db_pool: asyncpg.Pool | None = None
 
 
 # ================= FSM =================
@@ -55,45 +59,52 @@ class UserStates(StatesGroup):
 
 # ================= БАЗА =================
 async def init_db():
-    async with aiosqlite.connect("subs.db") as db:
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            expire_date TEXT
-        )
+    global db_pool
+
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL не задана в переменных окружения")
+
+    db_pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=1,
+        max_size=5,
+    )
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                expire_date TIMESTAMP NOT NULL
+            );
         """)
 
-        await db.execute("""
-        CREATE TABLE IF NOT EXISTS questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            username TEXT,
-            full_name TEXT,
-            type TEXT NOT NULL,
-            text TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'open'
-        )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS questions (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                username TEXT,
+                full_name TEXT,
+                type TEXT NOT NULL,
+                text TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                status TEXT NOT NULL DEFAULT 'open'
+            );
         """)
-
-        await db.commit()
 
 
 async def get_sub(user_id: int):
-    async with aiosqlite.connect("subs.db") as db:
-        cur = await db.execute(
-            "SELECT expire_date FROM users WHERE user_id = ?",
-            (user_id,)
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT expire_date FROM users WHERE user_id = $1",
+            user_id
         )
-        return await cur.fetchone()
 
 
 async def has_active_sub(user_id: int) -> bool:
     row = await get_sub(user_id)
     if not row:
         return False
-    expire = datetime.fromisoformat(row[0])
-    return expire > datetime.now()
+    return row["expire_date"] > datetime.now()
 
 
 async def add_sub(user_id: int):
@@ -101,111 +112,93 @@ async def add_sub(user_id: int):
 
 
 async def add_sub_days(user_id: int, days: int):
-    async with aiosqlite.connect("subs.db") as db:
-        cur = await db.execute(
-            "SELECT expire_date FROM users WHERE user_id = ?",
-            (user_id,)
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT expire_date FROM users WHERE user_id = $1",
+            user_id
         )
-        row = await cur.fetchone()
 
         now = datetime.now()
 
         if row:
-            old_expire = datetime.fromisoformat(row[0])
+            old_expire = row["expire_date"]
             expire = old_expire + timedelta(days=days) if old_expire > now else now + timedelta(days=days)
+            await conn.execute(
+                "UPDATE users SET expire_date = $1 WHERE user_id = $2",
+                expire, user_id
+            )
         else:
             expire = now + timedelta(days=days)
-
-        await db.execute(
-            "INSERT OR REPLACE INTO users VALUES (?, ?)",
-            (user_id, expire.isoformat())
-        )
-        await db.commit()
+            await conn.execute(
+                "INSERT INTO users (user_id, expire_date) VALUES ($1, $2)",
+                user_id, expire
+            )
 
 
 async def remove_sub(user_id: int):
-    async with aiosqlite.connect("subs.db") as db:
-        await db.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
-        await db.commit()
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM users WHERE user_id = $1",
+            user_id
+        )
 
 
 async def get_all_users():
-    async with aiosqlite.connect("subs.db") as db:
-        cur = await db.execute(
+    async with db_pool.acquire() as conn:
+        return await conn.fetch(
             "SELECT user_id, expire_date FROM users ORDER BY expire_date DESC"
         )
-        return await cur.fetchall()
 
 
 async def get_stats():
-    async with aiosqlite.connect("subs.db") as db:
-        cur = await db.execute("SELECT COUNT(*) FROM users")
-        total = (await cur.fetchone())[0]
-
-        now = datetime.now().isoformat()
-
-        cur = await db.execute(
-            "SELECT COUNT(*) FROM users WHERE expire_date > ?",
-            (now,)
+    async with db_pool.acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM users")
+        active = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expire_date > NOW()")
+        expired = await conn.fetchval("SELECT COUNT(*) FROM users WHERE expire_date <= NOW()")
+        open_content = await conn.fetchval(
+            "SELECT COUNT(*) FROM questions WHERE type = 'content' AND status = 'open'"
         )
-        active = (await cur.fetchone())[0]
-
-        cur = await db.execute(
-            "SELECT COUNT(*) FROM users WHERE expire_date <= ?",
-            (now,)
+        open_support = await conn.fetchval(
+            "SELECT COUNT(*) FROM questions WHERE type = 'support' AND status = 'open'"
         )
-        expired = (await cur.fetchone())[0]
-
-        cur = await db.execute("SELECT COUNT(*) FROM questions WHERE type = 'content' AND status = 'open'")
-        open_content = (await cur.fetchone())[0]
-
-        cur = await db.execute("SELECT COUNT(*) FROM questions WHERE type = 'support' AND status = 'open'")
-        open_support = (await cur.fetchone())[0]
-
         return total, active, expired, open_content, open_support
 
 
 async def save_question(user_id: int, username: str | None, full_name: str | None, q_type: str, text: str):
-    async with aiosqlite.connect("subs.db") as db:
-        await db.execute(
+    async with db_pool.acquire() as conn:
+        await conn.execute(
             """
-            INSERT INTO questions (user_id, username, full_name, type, text, created_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'open')
+            INSERT INTO questions (user_id, username, full_name, type, text)
+            VALUES ($1, $2, $3, $4, $5)
             """,
-            (
-                user_id,
-                username,
-                full_name,
-                q_type,
-                text,
-                datetime.now().isoformat()
-            )
+            user_id, username, full_name, q_type, text
         )
-        await db.commit()
 
 
 async def get_open_questions(q_type: str):
-    async with aiosqlite.connect("subs.db") as db:
-        cur = await db.execute(
+    async with db_pool.acquire() as conn:
+        return await conn.fetch(
             """
             SELECT id, user_id, username, full_name, text, created_at
             FROM questions
-            WHERE type = ? AND status = 'open'
+            WHERE type = $1 AND status = 'open'
             ORDER BY id DESC
             LIMIT 20
             """,
-            (q_type,)
+            q_type
         )
-        return await cur.fetchall()
 
 
 async def close_questions_by_user(user_id: int, q_type: str):
-    async with aiosqlite.connect("subs.db") as db:
-        await db.execute(
-            "UPDATE questions SET status = 'answered' WHERE user_id = ? AND type = ? AND status = 'open'",
-            (user_id, q_type)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE questions
+            SET status = 'answered'
+            WHERE user_id = $1 AND type = $2 AND status = 'open'
+            """,
+            user_id, q_type
         )
-        await db.commit()
 
 
 # ================= ХЕЛПЕРЫ =================
@@ -213,28 +206,26 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 
-def main_kb():
+def start_kb(user_id: int):
     rows = [
         [InlineKeyboardButton(text="💳 Купить доступ", callback_data="buy")],
-        [InlineKeyboardButton(text="📅 Моя подписка", callback_data="my_sub")]
+        [InlineKeyboardButton(text="📅 Моя подписка", callback_data="my_sub")],
     ]
-    if is_admin(ADMIN_ID):
+    if is_admin(user_id):
         rows.append([InlineKeyboardButton(text="⚙️ Админка", callback_data="open_admin")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def sub_manage_kb(active: bool):
     rows = []
-
     if active:
         rows.append([InlineKeyboardButton(text="🔗 Войти в канал", callback_data="sub_enter_channel")])
 
     rows.extend([
         [InlineKeyboardButton(text="❓ Вопрос по контенту", callback_data="sub_question_content")],
         [InlineKeyboardButton(text="🛠 Техподдержка / сотрудничество", callback_data="sub_question_support")],
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")]
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")],
     ])
-
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -250,60 +241,36 @@ def admin_kb():
         [InlineKeyboardButton(text="📣 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="❓ Вопросы по контенту", callback_data="admin_content_questions")],
         [InlineKeyboardButton(text="🛠 Обращения в поддержку", callback_data="admin_support_questions")],
-        [InlineKeyboardButton(text="💬 Ответить пользователю", callback_data="admin_answer_user")]
+        [InlineKeyboardButton(text="💬 Ответить пользователю", callback_data="admin_answer_user")],
     ])
 
 
 async def send_invite_to_user(user_id: int):
-    expire_date = datetime.now() + timedelta(minutes=10)
-
     link = await bot.create_chat_invite_link(
         chat_id=CHANNEL_ID,
         member_limit=1,
-        expire_date=expire_date
+        expire_date=datetime.now() + timedelta(minutes=10)
     )
-
     await bot.send_message(
         user_id,
-        f"🔗 Ссылка для входа в канал:\n{link.invite_link}\n\n"
-        f"Ссылка действует 10 минут."
+        f"🔗 Ссылка для входа в канал:\n{link.invite_link}\n\nСсылка действует 10 минут."
     )
 
 
 # ================= СТАРТ =================
 @dp.message(CommandStart())
 async def start(message: Message):
-    kb_rows = [
-        [InlineKeyboardButton(text="💳 Купить доступ", callback_data="buy")],
-        [InlineKeyboardButton(text="📅 Моя подписка", callback_data="my_sub")]
-    ]
-    if is_admin(message.from_user.id):
-        kb_rows.append([InlineKeyboardButton(text="⚙️ Админка", callback_data="open_admin")])
-
-    await message.answer_photo(
-        photo="https://i.ibb.co/jpPL9Kk/photo-2026-03-28-9-05-07-PM.jpg",
-        caption=(
-            "🔥 <b>Доступ к обучению обклейки полиуретановой пленкой</b>\n\n"
-            "💰 15000₽ / 365 дней\n"
-            "📈 Материалы, полный цикл обучения, все аспекты бизнеса"
-        ),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    await message.answer(
+        "🔥 <b>Доступ к обучению обклейки полиуретановой пленкой</b>\n\n"
+        "💰 15000₽ / 365 дней\n"
+        "📈 Материалы, полный цикл обучения, все аспекты бизнеса",
+        reply_markup=start_kb(message.from_user.id)
     )
 
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery):
-    kb_rows = [
-        [InlineKeyboardButton(text="💳 Купить доступ", callback_data="buy")],
-        [InlineKeyboardButton(text="📅 Моя подписка", callback_data="my_sub")]
-    ]
-    if is_admin(callback.from_user.id):
-        kb_rows.append([InlineKeyboardButton(text="⚙️ Админка", callback_data="open_admin")])
-
-    await callback.message.answer(
-        "Главное меню:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    )
+    await callback.message.answer("Главное меню:", reply_markup=start_kb(callback.from_user.id))
     await callback.answer()
 
 
@@ -311,7 +278,6 @@ async def back_to_main(callback: CallbackQuery):
 @dp.callback_query(F.data == "buy")
 async def buy(callback: CallbackQuery):
     prices = [LabeledPrice(label="Подписка на 365 дней", amount=PRICE)]
-
     await callback.answer()
 
     await bot.send_invoice(
@@ -334,14 +300,13 @@ async def my_sub(callback: CallbackQuery):
 
     if not sub:
         await callback.message.answer(
-            "❌ У тебя нет подписки.\n\n"
-            "После покупки здесь появится управление подпиской.",
+            "❌ У тебя нет подписки.\n\nПосле покупки здесь появится управление подпиской.",
             reply_markup=sub_manage_kb(False)
         )
         await callback.answer()
         return
 
-    expire = datetime.fromisoformat(sub[0])
+    expire = sub["expire_date"]
     status = "✅ Активна" if active else "❌ Истекла"
 
     await callback.message.answer(
@@ -361,22 +326,15 @@ async def sub_enter_channel(callback: CallbackQuery):
         await callback.answer()
         return
 
-    try:
-        await send_invite_to_user(callback.from_user.id)
-        await callback.message.answer("✅ Новая ссылка отправлена тебе в чат.")
-    except Exception as e:
-        await callback.message.answer(f"Не удалось отправить ссылку.\nОшибка: <code>{e}</code>")
-
+    await send_invite_to_user(callback.from_user.id)
+    await callback.message.answer("✅ Новая ссылка отправлена тебе в чат.")
     await callback.answer()
 
 
 @dp.callback_query(F.data == "sub_question_content")
 async def sub_question_content(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UserStates.ask_content)
-    await callback.message.answer(
-        "❓ Напиши свой вопрос по контенту канала одним сообщением.\n\n"
-        "Он будет отправлен администратору."
-    )
+    await callback.message.answer("Напиши свой вопрос по контенту одним сообщением.")
     await callback.answer()
 
 
@@ -387,18 +345,16 @@ async def process_content_question(message: Message, state: FSMContext):
         username=message.from_user.username,
         full_name=message.from_user.full_name,
         q_type="content",
-        text=message.text
+        text=message.text,
     )
-
     await bot.send_message(
         ADMIN_ID,
         f"❓ <b>Новый вопрос по контенту</b>\n\n"
-        f"ID пользователя: <code>{message.from_user.id}</code>\n"
+        f"ID: <code>{message.from_user.id}</code>\n"
         f"Имя: {message.from_user.full_name}\n"
         f"Username: @{message.from_user.username if message.from_user.username else 'нет'}\n\n"
-        f"Сообщение:\n{message.text}"
+        f"{message.text}"
     )
-
     await message.answer("✅ Вопрос отправлен администратору.")
     await state.clear()
 
@@ -406,10 +362,7 @@ async def process_content_question(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "sub_question_support")
 async def sub_question_support(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UserStates.ask_support)
-    await callback.message.answer(
-        "🛠 Напиши обращение в техподдержку / по сотрудничеству одним сообщением.\n\n"
-        "Оно будет отправлено администратору."
-    )
+    await callback.message.answer("Напиши обращение в техподдержку / по сотрудничеству одним сообщением.")
     await callback.answer()
 
 
@@ -420,18 +373,16 @@ async def process_support_question(message: Message, state: FSMContext):
         username=message.from_user.username,
         full_name=message.from_user.full_name,
         q_type="support",
-        text=message.text
+        text=message.text,
     )
-
     await bot.send_message(
         ADMIN_ID,
         f"🛠 <b>Новое обращение в поддержку</b>\n\n"
-        f"ID пользователя: <code>{message.from_user.id}</code>\n"
+        f"ID: <code>{message.from_user.id}</code>\n"
         f"Имя: {message.from_user.full_name}\n"
         f"Username: @{message.from_user.username if message.from_user.username else 'нет'}\n\n"
-        f"Сообщение:\n{message.text}"
+        f"{message.text}"
     )
-
     await message.answer("✅ Обращение отправлено администратору.")
     await state.clear()
 
@@ -445,27 +396,13 @@ async def pre_checkout(q: PreCheckoutQuery):
 @dp.message(F.successful_payment)
 async def success_payment(message: Message):
     user_id = message.from_user.id
-
     await add_sub(user_id)
-
-    link = await bot.create_chat_invite_link(
-        chat_id=CHANNEL_ID,
-        member_limit=1,
-        expire_date=datetime.now() + timedelta(minutes=10)
-    )
-
-    await message.answer(
-        f"✅ Оплата прошла!\n\n"
-        f"🔗 Ссылка (действует 10 минут):\n{link.invite_link}"
-    )
+    await send_invite_to_user(user_id)
 
     try:
         await bot.send_message(
             ADMIN_ID,
-            f"💰 Новая оплата\n\n"
-            f"User ID: <code>{user_id}</code>\n"
-            f"Сумма: <b>15000₽</b>\n"
-            f"Срок: <b>{DAYS} дней</b>"
+            f"💰 Новая оплата\n\nUser ID: <code>{user_id}</code>\nСумма: <b>15000₽</b>\nСрок: <b>{DAYS} дней</b>"
         )
     except Exception:
         pass
@@ -477,11 +414,7 @@ async def admin_panel(message: Message):
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Нет доступа")
         return
-
-    await message.answer(
-        "⚙️ <b>Админ-панель</b>\n\nВыбери действие:",
-        reply_markup=admin_kb()
-    )
+    await message.answer("⚙️ <b>Админ-панель</b>", reply_markup=admin_kb())
 
 
 @dp.callback_query(F.data == "open_admin")
@@ -489,11 +422,7 @@ async def open_admin(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
-
-    await callback.message.answer(
-        "⚙️ <b>Админ-панель</b>\n\nВыбери действие:",
-        reply_markup=admin_kb()
-    )
+    await callback.message.answer("⚙️ <b>Админ-панель</b>", reply_markup=admin_kb())
     await callback.answer()
 
 
@@ -502,12 +431,10 @@ async def admin_stats(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
-
     total, active, expired, open_content, open_support = await get_stats()
-
     await callback.message.answer(
         "📊 <b>Статистика</b>\n\n"
-        f"Всего пользователей в БД: <b>{total}</b>\n"
+        f"Всего пользователей: <b>{total}</b>\n"
         f"Активных подписок: <b>{active}</b>\n"
         f"Истёкших подписок: <b>{expired}</b>\n"
         f"Открытых вопросов по контенту: <b>{open_content}</b>\n"
@@ -523,7 +450,6 @@ async def admin_users(callback: CallbackQuery):
         return
 
     rows = await get_all_users()
-
     if not rows:
         await callback.message.answer("Пользователей в базе нет.")
         await callback.answer()
@@ -532,8 +458,9 @@ async def admin_users(callback: CallbackQuery):
     text = "👥 <b>Подписки</b>\n\n"
     now = datetime.now()
 
-    for user_id, expire in rows[:50]:
-        expire_dt = datetime.fromisoformat(expire)
+    for row in rows[:50]:
+        user_id = row["user_id"]
+        expire_dt = row["expire_date"]
         status = "✅ активна" if expire_dt > now else "❌ истекла"
         text += f"<code>{user_id}</code> — {expire_dt.strftime('%d.%m.%Y %H:%M')} — {status}\n"
 
@@ -567,13 +494,12 @@ async def admin_find_finish(message: Message, state: FSMContext):
         return
 
     sub = await get_sub(user_id)
-
     if not sub:
         await message.answer(f"Пользователь <code>{user_id}</code> не найден в базе.")
         await state.clear()
         return
 
-    expire = datetime.fromisoformat(sub[0])
+    expire = sub["expire_date"]
     now = datetime.now()
     status = "✅ активна" if expire > now else "❌ истекла"
 
@@ -755,7 +681,8 @@ async def admin_broadcast_finish(message: Message, state: FSMContext):
     success = 0
     failed = 0
 
-    for user_id, _ in rows:
+    for row in rows:
+        user_id = row["user_id"]
         try:
             await bot.send_message(user_id, message.text)
             success += 1
@@ -778,21 +705,20 @@ async def admin_content_questions(callback: CallbackQuery):
         return
 
     rows = await get_open_questions("content")
-
     if not rows:
         await callback.message.answer("Открытых вопросов по контенту нет.")
         await callback.answer()
         return
 
     text = "❓ <b>Вопросы по контенту</b>\n\n"
-    for q_id, user_id, username, full_name, q_text, created_at in rows:
-        dt = datetime.fromisoformat(created_at).strftime('%d.%m.%Y %H:%M')
+    for row in rows:
+        dt = row["created_at"].strftime('%d.%m.%Y %H:%M')
         text += (
-            f"#{q_id} | <code>{user_id}</code>\n"
-            f"Имя: {full_name or '-'}\n"
-            f"Username: @{username if username else 'нет'}\n"
+            f"#{row['id']} | <code>{row['user_id']}</code>\n"
+            f"Имя: {row['full_name'] or '-'}\n"
+            f"Username: @{row['username'] if row['username'] else 'нет'}\n"
             f"Дата: {dt}\n"
-            f"Текст: {q_text}\n\n"
+            f"Текст: {row['text']}\n\n"
         )
 
     await callback.message.answer(text[:4000])
@@ -806,21 +732,20 @@ async def admin_support_questions(callback: CallbackQuery):
         return
 
     rows = await get_open_questions("support")
-
     if not rows:
         await callback.message.answer("Открытых обращений в поддержку нет.")
         await callback.answer()
         return
 
     text = "🛠 <b>Обращения в поддержку</b>\n\n"
-    for q_id, user_id, username, full_name, q_text, created_at in rows:
-        dt = datetime.fromisoformat(created_at).strftime('%d.%m.%Y %H:%M')
+    for row in rows:
+        dt = row["created_at"].strftime('%d.%m.%Y %H:%M')
         text += (
-            f"#{q_id} | <code>{user_id}</code>\n"
-            f"Имя: {full_name or '-'}\n"
-            f"Username: @{username if username else 'нет'}\n"
+            f"#{row['id']} | <code>{row['user_id']}</code>\n"
+            f"Имя: {row['full_name'] or '-'}\n"
+            f"Username: @{row['username'] if row['username'] else 'нет'}\n"
             f"Дата: {dt}\n"
-            f"Текст: {q_text}\n\n"
+            f"Текст: {row['text']}\n\n"
         )
 
     await callback.message.answer(text[:4000])
@@ -877,24 +802,20 @@ async def admin_answer_send(message: Message, state: FSMContext):
     await state.clear()
 
 
-# ================= АВТО-КИК =================
+# ================= ФОНОВАЯ ПРОВЕРКА =================
 async def check_subs():
     while True:
-        async with aiosqlite.connect("subs.db") as db:
-            cur = await db.execute("SELECT user_id, expire_date FROM users")
-            rows = await cur.fetchall()
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch("SELECT user_id, expire_date FROM users")
 
-            now = datetime.now()
-
-            for user_id, expire in rows:
-                expire_dt = datetime.fromisoformat(expire)
-
-                if expire_dt < now:
-                    try:
-                        await bot.ban_chat_member(CHANNEL_ID, user_id)
-                        await bot.unban_chat_member(CHANNEL_ID, user_id)
-                    except Exception:
-                        pass
+        now = datetime.now()
+        for row in rows:
+            if row["expire_date"] < now:
+                try:
+                    await bot.ban_chat_member(CHANNEL_ID, row["user_id"])
+                    await bot.unban_chat_member(CHANNEL_ID, row["user_id"])
+                except Exception:
+                    pass
 
         await asyncio.sleep(60)
 
@@ -918,11 +839,14 @@ async def start_web():
 
 # ================= ЗАПУСК =================
 async def main():
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN не задан")
+    if not PAYMENTS_TOKEN:
+        raise RuntimeError("PAYMENTS_TOKEN не задан")
+
     await init_db()
     await start_web()
-
     asyncio.create_task(check_subs())
-
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
