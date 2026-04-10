@@ -1,14 +1,15 @@
 import asyncio
-import os
 import logging
+import os
 from datetime import datetime, timedelta
+from typing import Optional
 
 import asyncpg
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -29,10 +30,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ================= НАСТРОЙКИ =================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-PAYMENTS_TOKEN = os.getenv("PAYMENTS_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "")
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+PAYMENTS_TOKEN = (os.getenv("PAYMENTS_TOKEN") or "").strip()
+DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+RENDER_EXTERNAL_URL = (os.getenv("RENDER_EXTERNAL_URL") or "").strip()
 
 CHANNEL_ID = -1003616232121
 ADMIN_ID = 583554883
@@ -52,7 +53,7 @@ bot = Bot(
 )
 
 dp = Dispatcher()
-db_pool: asyncpg.Pool | None = None
+db_pool: Optional[asyncpg.Pool] = None
 
 BTN_MENU = "🏠 Меню"
 BTN_BUY = "💳 Купить доступ"
@@ -99,12 +100,13 @@ async def init_db():
     logger.info("INIT_DB: start")
 
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL не задана")
+        raise RuntimeError("DATABASE_URL не задан")
 
     db_pool = await asyncpg.create_pool(
         DATABASE_URL,
         min_size=1,
         max_size=5,
+        command_timeout=30,
     )
 
     async with db_pool.acquire() as conn:
@@ -117,6 +119,11 @@ async def init_db():
                 expire_date TIMESTAMP,
                 created_at TIMESTAMP NOT NULL DEFAULT NOW()
             );
+        """)
+
+        await conn.execute("""
+            ALTER TABLE IF EXISTS users
+            ALTER COLUMN expire_date DROP NOT NULL;
         """)
 
         await conn.execute("""
@@ -190,14 +197,20 @@ async def init_db():
     logger.info("INIT_DB: done")
 
 
+def get_pool() -> asyncpg.Pool:
+    if db_pool is None:
+        raise RuntimeError("db_pool не инициализирован")
+    return db_pool
+
+
 # ================= ХЕЛПЕРЫ БД =================
 async def get_setting(key: str):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         return await conn.fetchval("SELECT value FROM settings WHERE key = $1", key)
 
 
 async def set_setting(key: str, value: str | None):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute("""
             INSERT INTO settings (key, value)
             VALUES ($1, $2)
@@ -232,7 +245,7 @@ async def is_admin(user_id: int) -> bool:
     if user_id == ADMIN_ID:
         return True
 
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         exists = await conn.fetchval(
             "SELECT 1 FROM admins WHERE user_id = $1",
             user_id
@@ -241,7 +254,7 @@ async def is_admin(user_id: int) -> bool:
 
 
 async def add_admin(user_id: int, added_by: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute("""
             INSERT INTO admins (user_id, added_at, added_by)
             VALUES ($1, NOW(), $2)
@@ -253,14 +266,14 @@ async def remove_admin(user_id: int):
     if user_id == ADMIN_ID:
         return False
 
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute("DELETE FROM admins WHERE user_id = $1", user_id)
 
     return True
 
 
 async def list_admins():
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         return await conn.fetch("""
             SELECT user_id, added_at, added_by
             FROM admins
@@ -269,7 +282,7 @@ async def list_admins():
 
 
 async def ensure_user_exists(user_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute("""
             INSERT INTO users (user_id, expire_date, created_at)
             VALUES ($1, NULL, NOW())
@@ -278,7 +291,7 @@ async def ensure_user_exists(user_id: int):
 
 
 async def get_sub(user_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         return await conn.fetchrow(
             "SELECT user_id, expire_date, created_at FROM users WHERE user_id = $1",
             user_id
@@ -298,7 +311,7 @@ async def add_sub(user_id: int):
 
 
 async def add_sub_days(user_id: int, days: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             "SELECT expire_date FROM users WHERE user_id = $1",
             user_id
@@ -326,7 +339,7 @@ async def add_sub_days(user_id: int, days: int):
 
 
 async def remove_sub(user_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute(
             "UPDATE users SET expire_date = NULL WHERE user_id = $1",
             user_id
@@ -334,14 +347,14 @@ async def remove_sub(user_id: int):
 
 
 async def get_all_users():
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         return await conn.fetch(
             "SELECT user_id, expire_date, created_at FROM users ORDER BY created_at DESC"
         )
 
 
 async def get_stats():
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM users")
         active = await conn.fetchval(
             "SELECT COUNT(*) FROM users WHERE expire_date IS NOT NULL AND expire_date > NOW()"
@@ -361,7 +374,7 @@ async def get_stats():
 
 async def save_question(user_id: int, username: str | None, full_name: str | None, q_type: str, text: str):
     await ensure_user_exists(user_id)
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute("""
             INSERT INTO questions (user_id, username, full_name, type, text)
             VALUES ($1, $2, $3, $4, $5)
@@ -369,7 +382,7 @@ async def save_question(user_id: int, username: str | None, full_name: str | Non
 
 
 async def get_open_questions(q_type: str):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         return await conn.fetch("""
             SELECT id, user_id, username, full_name, text, created_at
             FROM questions
@@ -380,7 +393,7 @@ async def get_open_questions(q_type: str):
 
 
 async def close_questions_by_user(user_id: int, q_type: str):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         await conn.execute("""
             UPDATE questions
             SET status = 'answered'
@@ -389,7 +402,7 @@ async def close_questions_by_user(user_id: int, q_type: str):
 
 
 async def get_user_question_counts(user_id: int):
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM questions WHERE user_id = $1", user_id)
         content = await conn.fetchval("SELECT COUNT(*) FROM questions WHERE user_id = $1 AND type = 'content'", user_id)
         support = await conn.fetchval("SELECT COUNT(*) FROM questions WHERE user_id = $1 AND type = 'support'", user_id)
@@ -407,7 +420,7 @@ async def get_user_stats_text(user_id: int):
     total_q, content_q, support_q = await get_user_question_counts(user_id)
 
     status = "✅ Активна" if expire and expire > datetime.now() else "❌ Нет активной подписки"
-    expire_text = expire.strftime('%d.%m.%Y %H:%M') if expire else "—"
+    expire_text = expire.strftime("%d.%m.%Y %H:%M") if expire else "—"
 
     return (
         f"👤 <code>{user_id}</code>\n"
@@ -485,10 +498,10 @@ def admin_kb():
 
 
 # ================= ОБЩИЕ ФУНКЦИИ =================
-async def send_start_menu(message: Message):
-    await ensure_user_exists(message.from_user.id)
+async def send_start_menu_to_user(chat_id: int, user_id: int):
+    await ensure_user_exists(user_id)
 
-    admin_user = await is_admin(message.from_user.id)
+    admin_user = await is_admin(user_id)
     start_text = await get_setting("start_text") or DEFAULT_START_TEXT
     media_type = await get_setting("start_media_type")
     media_file_id = await get_setting("start_media_file_id")
@@ -497,25 +510,63 @@ async def send_start_menu(message: Message):
     inline_markup = start_inline_kb(admin_user)
 
     if media_type == "photo" and media_file_id:
-        await message.answer_photo(
+        await bot.send_photo(
+            chat_id=chat_id,
             photo=media_file_id,
             caption=start_text,
             reply_markup=inline_markup
         )
-        await message.answer("Меню:", reply_markup=reply_markup)
+        await bot.send_message(chat_id, "Меню:", reply_markup=reply_markup)
         return
 
     if media_type == "video" and media_file_id:
-        await message.answer_video(
+        await bot.send_video(
+            chat_id=chat_id,
             video=media_file_id,
             caption=start_text,
             reply_markup=inline_markup
         )
-        await message.answer("Меню:", reply_markup=reply_markup)
+        await bot.send_message(chat_id, "Меню:", reply_markup=reply_markup)
         return
 
-    await message.answer(start_text, reply_markup=inline_markup)
-    await message.answer("Меню:", reply_markup=reply_markup)
+    await bot.send_message(chat_id, start_text, reply_markup=inline_markup)
+    await bot.send_message(chat_id, "Меню:", reply_markup=reply_markup)
+
+
+async def show_my_sub_to_user(chat_id: int, user_id: int):
+    await ensure_user_exists(user_id)
+
+    sub = await get_sub(user_id)
+    active = await has_active_sub(user_id)
+
+    if not sub:
+        await bot.send_message(
+            chat_id,
+            "❌ У тебя нет подписки.\n\nПосле покупки здесь появится управление подпиской.",
+            reply_markup=sub_manage_kb(False)
+        )
+        return
+
+    created_at = sub["created_at"]
+    expire = sub["expire_date"]
+    days_in_base = (datetime.now() - created_at).days
+    total_q, content_q, support_q = await get_user_question_counts(user_id)
+
+    status = "✅ Активна" if active else "❌ Истекла"
+    expire_text = expire.strftime("%d.%m.%Y %H:%M") if expire else "—"
+
+    await bot.send_message(
+        chat_id,
+        f"📅 <b>Твоя подписка</b>\n\n"
+        f"Статус: {status}\n"
+        f"Действует до: <b>{expire_text}</b>\n"
+        f"В базе: <b>{days_in_base}</b> дн.\n"
+        f"Всего вопросов: <b>{total_q}</b>\n"
+        f"По контенту: <b>{content_q}</b>\n"
+        f"В поддержку: <b>{support_q}</b>\n\n"
+        f"Ниже доступны инструменты управления.",
+        reply_markup=sub_manage_kb(active)
+    )
 
 
 async def send_invite_to_user(user_id: int):
@@ -556,12 +607,12 @@ async def send_deploy_report():
 # ================= СТАРТ / МЕНЮ =================
 @dp.message(CommandStart())
 async def start_cmd(message: Message):
-    await send_start_menu(message)
+    await send_start_menu_to_user(message.chat.id, message.from_user.id)
 
 
 @dp.message(F.text == BTN_MENU)
 async def menu_btn(message: Message):
-    await send_start_menu(message)
+    await send_start_menu_to_user(message.chat.id, message.from_user.id)
 
 
 @dp.message(F.text == BTN_BUY)
@@ -572,7 +623,7 @@ async def buy_btn_message(message: Message):
 
 @dp.message(F.text == BTN_SUB)
 async def sub_btn_message(message: Message):
-    await show_my_sub(message)
+    await show_my_sub_to_user(message.chat.id, message.from_user.id)
 
 
 @dp.message(F.text == BTN_ADMIN)
@@ -585,7 +636,7 @@ async def admin_btn_message(message: Message):
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: CallbackQuery):
-    await send_start_menu(callback.message)
+    await send_start_menu_to_user(callback.from_user.id, callback.from_user.id)
     await callback.answer()
 
 
@@ -613,43 +664,9 @@ async def buy_callback(callback: CallbackQuery):
 
 
 # ================= МОЯ ПОДПИСКА =================
-async def show_my_sub(message: Message):
-    await ensure_user_exists(message.from_user.id)
-
-    sub = await get_sub(message.from_user.id)
-    active = await has_active_sub(message.from_user.id)
-
-    if not sub:
-        await message.answer(
-            "❌ У тебя нет подписки.\n\nПосле покупки здесь появится управление подпиской.",
-            reply_markup=sub_manage_kb(False)
-        )
-        return
-
-    created_at = sub["created_at"]
-    expire = sub["expire_date"]
-    days_in_base = (datetime.now() - created_at).days
-    total_q, content_q, support_q = await get_user_question_counts(message.from_user.id)
-
-    status = "✅ Активна" if active else "❌ Истекла"
-    expire_text = expire.strftime('%d.%m.%Y %H:%M') if expire else "—"
-
-    await message.answer(
-        f"📅 <b>Твоя подписка</b>\n\n"
-        f"Статус: {status}\n"
-        f"Действует до: <b>{expire_text}</b>\n"
-        f"В базе: <b>{days_in_base}</b> дн.\n"
-        f"Всего вопросов: <b>{total_q}</b>\n"
-        f"По контенту: <b>{content_q}</b>\n"
-        f"В поддержку: <b>{support_q}</b>\n\n"
-        f"Ниже доступны инструменты управления.",
-        reply_markup=sub_manage_kb(active)
-    )
-
-
 @dp.callback_query(F.data == "my_sub")
 async def my_sub_callback(callback: CallbackQuery):
-    await show_my_sub(callback.message)
+    await show_my_sub_to_user(callback.from_user.id, callback.from_user.id)
     await callback.answer()
 
 
@@ -688,7 +705,7 @@ async def process_content_question(message: Message, state: FSMContext):
         f"ID: <code>{message.from_user.id}</code>\n"
         f"Имя: {message.from_user.full_name}\n"
         f"Username: @{message.from_user.username if message.from_user.username else 'нет'}\n\n"
-        f"{message.text}"
+        f"{message.text or ''}"
     )
     await message.answer("✅ Вопрос отправлен администратору.")
     await state.clear()
@@ -716,7 +733,7 @@ async def process_support_question(message: Message, state: FSMContext):
         f"ID: <code>{message.from_user.id}</code>\n"
         f"Имя: {message.from_user.full_name}\n"
         f"Username: @{message.from_user.username if message.from_user.username else 'нет'}\n\n"
-        f"{message.text}"
+        f"{message.text or ''}"
     )
     await message.answer("✅ Обращение отправлено администратору.")
     await state.clear()
@@ -737,6 +754,8 @@ async def success_payment(message: Message):
     await add_sub(user_id)
     await send_invite_to_user(user_id)
 
+    await message.answer("✅ Оплата прошла успешно. Ссылка для входа уже отправлена.")
+
     try:
         await bot.send_message(
             ADMIN_ID,
@@ -746,7 +765,7 @@ async def success_payment(message: Message):
             f"Срок: <b>{sub_days} дней</b>"
         )
     except Exception:
-        pass
+        logger.exception("Не удалось отправить уведомление админу о платеже")
 
 
 # ================= АДМИНКА =================
@@ -812,7 +831,7 @@ async def admin_set_price_finish(message: Message, state: FSMContext):
         return
 
     try:
-        rub = float(message.text.replace(",", ".").strip())
+        rub = float((message.text or "").replace(",", ".").strip())
         if rub <= 0:
             raise ValueError
         kop = int(round(rub * 100))
@@ -846,7 +865,7 @@ async def admin_set_days_finish(message: Message, state: FSMContext):
         return
 
     try:
-        days = int(message.text.strip())
+        days = int((message.text or "").strip())
         if days <= 0:
             raise ValueError
     except Exception:
@@ -879,7 +898,7 @@ async def admin_users(callback: CallbackQuery):
         created_at = row["created_at"]
         days_in_base = (now - created_at).days
         status = "✅ активна" if expire_dt and expire_dt > now else "❌ нет активной"
-        expire_text = expire_dt.strftime('%d.%m.%Y') if expire_dt else "—"
+        expire_text = expire_dt.strftime("%d.%m.%Y") if expire_dt else "—"
         text += f"<code>{user_id}</code> | {status} | до {expire_text} | в базе {days_in_base} дн.\n"
 
     if len(rows) > 50:
@@ -905,7 +924,7 @@ async def admin_find_finish(message: Message, state: FSMContext):
         return
 
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -935,7 +954,7 @@ async def admin_add_sub_user(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -950,7 +969,7 @@ async def admin_add_sub_days_finish(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
     try:
-        days = int(message.text.strip())
+        days = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужно указать число дней.")
         return
@@ -977,7 +996,7 @@ async def admin_extend_user(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -992,7 +1011,7 @@ async def admin_extend_finish(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
     try:
-        days = int(message.text.strip())
+        days = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужно указать число дней.")
         return
@@ -1019,7 +1038,7 @@ async def admin_delete_finish(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -1044,7 +1063,7 @@ async def admin_invite_finish(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -1053,6 +1072,7 @@ async def admin_invite_finish(message: Message, state: FSMContext):
         await send_invite_to_user(user_id)
         await message.answer(f"✅ Ссылка отправлена пользователю <code>{user_id}</code>.")
     except Exception as e:
+        logger.exception("Ошибка ручной отправки ссылки")
         await message.answer(f"Ошибка отправки: <code>{e}</code>")
 
     await state.clear()
@@ -1074,7 +1094,7 @@ async def admin_add_admin_finish(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -1099,7 +1119,7 @@ async def admin_remove_admin_finish(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -1175,7 +1195,7 @@ async def admin_set_start_media(callback: CallbackQuery, state: FSMContext):
 async def admin_remove_start_media(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
-    if message.text.strip().lower() == "remove":
+    if (message.text or "").strip().lower() == "remove":
         await set_setting("start_media_type", None)
         await set_setting("start_media_file_id", None)
         await message.answer("✅ Медиа для стартового сообщения удалено.")
@@ -1340,7 +1360,7 @@ async def admin_content_questions(callback: CallbackQuery):
 
     text = "❓ <b>Вопросы по контенту</b>\n\n"
     for row in rows:
-        dt = row["created_at"].strftime('%d.%m.%Y %H:%M')
+        dt = row["created_at"].strftime("%d.%m.%Y %H:%M")
         text += (
             f"#{row['id']} | <code>{row['user_id']}</code>\n"
             f"Имя: {row['full_name'] or '-'}\n"
@@ -1367,7 +1387,7 @@ async def admin_support_questions(callback: CallbackQuery):
 
     text = "🛠 <b>Обращения в поддержку</b>\n\n"
     for row in rows:
-        dt = row["created_at"].strftime('%d.%m.%Y %H:%M')
+        dt = row["created_at"].strftime("%d.%m.%Y %H:%M")
         text += (
             f"#{row['id']} | <code>{row['user_id']}</code>\n"
             f"Имя: {row['full_name'] or '-'}\n"
@@ -1396,7 +1416,7 @@ async def admin_answer_get_user_id(message: Message, state: FSMContext):
     if not await require_admin(message.from_user.id):
         return
     try:
-        user_id = int(message.text.strip())
+        user_id = int((message.text or "").strip())
     except Exception:
         await message.answer("Нужен числовой user_id.")
         return
@@ -1424,6 +1444,7 @@ async def admin_answer_send(message: Message, state: FSMContext):
         await close_questions_by_user(user_id, "support")
         await message.answer(f"✅ Ответ отправлен пользователю <code>{user_id}</code>.")
     except Exception as e:
+        logger.exception("Не удалось отправить ответ пользователю")
         await message.answer(f"Не удалось отправить ответ.\nОшибка: <code>{e}</code>")
 
     await state.clear()
@@ -1436,7 +1457,7 @@ async def dbtest(message: Message):
         await message.answer("Нет доступа")
         return
 
-    async with db_pool.acquire() as conn:
+    async with get_pool().acquire() as conn:
         now_db = await conn.fetchval("SELECT NOW()")
         users_count = await conn.fetchval("SELECT COUNT(*) FROM users")
         questions_count = await conn.fetchval("SELECT COUNT(*) FROM questions")
@@ -1456,7 +1477,7 @@ async def check_subs():
     logger.info("CHECK_SUBS: started")
     while True:
         try:
-            async with db_pool.acquire() as conn:
+            async with get_pool().acquire() as conn:
                 rows = await conn.fetch(
                     "SELECT user_id, expire_date FROM users WHERE expire_date IS NOT NULL"
                 )
@@ -1468,7 +1489,7 @@ async def check_subs():
                         await bot.ban_chat_member(CHANNEL_ID, row["user_id"])
                         await bot.unban_chat_member(CHANNEL_ID, row["user_id"])
                     except Exception:
-                        pass
+                        logger.exception("Не удалось кикнуть пользователя %s", row["user_id"])
         except Exception as e:
             logger.exception("CHECK_SUBS ERROR: %s", e)
 
@@ -1498,6 +1519,13 @@ async def start_web():
     logger.info("WEB STARTED ON PORT %s", port)
 
 
+# ================= ERROR LOGGING =================
+@dp.error()
+async def global_error_handler(event, exception):
+    logger.exception("GLOBAL HANDLER ERROR: %s | EVENT: %s", exception, event)
+    return True
+
+
 # ================= ЗАПУСК =================
 async def main():
     logger.info("MAIN: start")
@@ -1522,10 +1550,16 @@ async def main():
     logger.info("MAIN: deleting webhook")
     await bot.delete_webhook(drop_pending_updates=True)
 
+    me = await bot.get_me()
+    logger.info("MAIN: bot username = @%s, id = %s", me.username, me.id)
+
     await send_deploy_report()
 
     logger.info("MAIN: start polling")
-    await dp.start_polling(bot)
+    await dp.start_polling(
+        bot,
+        allowed_updates=dp.resolve_used_update_types()
+    )
 
 
 if __name__ == "__main__":
