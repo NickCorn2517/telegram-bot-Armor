@@ -157,38 +157,35 @@ async def init_db():
             );
         """)
 
-        existing = await conn.fetchval("SELECT value FROM settings WHERE key = 'start_text'")
-        if existing is None:
-            await conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('start_text', $1)",
-                DEFAULT_START_TEXT
-            )
+        await conn.execute("""
+            INSERT INTO settings (key, value)
+            VALUES ('start_text', $1)
+            ON CONFLICT (key) DO NOTHING
+        """, DEFAULT_START_TEXT)
 
-        existing = await conn.fetchval("SELECT value FROM settings WHERE key = 'start_media_type'")
-        if existing is None:
-            await conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('start_media_type', NULL)"
-            )
+        await conn.execute("""
+            INSERT INTO settings (key, value)
+            VALUES ('start_media_type', NULL)
+            ON CONFLICT (key) DO NOTHING
+        """)
 
-        existing = await conn.fetchval("SELECT value FROM settings WHERE key = 'start_media_file_id'")
-        if existing is None:
-            await conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('start_media_file_id', NULL)"
-            )
+        await conn.execute("""
+            INSERT INTO settings (key, value)
+            VALUES ('start_media_file_id', NULL)
+            ON CONFLICT (key) DO NOTHING
+        """)
 
-        existing = await conn.fetchval("SELECT value FROM settings WHERE key = 'sub_price_kop'")
-        if existing is None:
-            await conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('sub_price_kop', $1)",
-                str(DEFAULT_PRICE)
-            )
+        await conn.execute("""
+            INSERT INTO settings (key, value)
+            VALUES ('sub_price_kop', $1)
+            ON CONFLICT (key) DO NOTHING
+        """, str(DEFAULT_PRICE))
 
-        existing = await conn.fetchval("SELECT value FROM settings WHERE key = 'sub_days'")
-        if existing is None:
-            await conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('sub_days', $1)",
-                str(DEFAULT_DAYS)
-            )
+        await conn.execute("""
+            INSERT INTO settings (key, value)
+            VALUES ('sub_days', $1)
+            ON CONFLICT (key) DO NOTHING
+        """, str(DEFAULT_DAYS))
 
     logger.info("INIT_DB: done")
 
@@ -226,7 +223,7 @@ async def get_sub_days() -> int:
 
 def format_rub_from_kop(kop: int) -> str:
     rub = kop / 100
-    if rub.is_integer():
+    if float(rub).is_integer():
         return f"{int(rub)}₽"
     return f"{rub:.2f}₽"
 
