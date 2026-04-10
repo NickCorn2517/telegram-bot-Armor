@@ -50,7 +50,7 @@ DEFAULT_TARIFFS = [
         "price_kop": 1500000,
         "days": 365,
         "active": True,
-        "pseudo_mode": "choice",  # off / choice / default_on
+        "pseudo_mode": "choice",
     },
     {
         "id": 2,
@@ -2762,8 +2762,8 @@ async def start_web():
 
 
 @dp.error()
-async def on_error(event, exception):
-    logger.exception("GLOBAL ERROR: %s | EVENT: %s", exception, event)
+async def on_error(event):
+    logger.exception("GLOBAL ERROR: %s", event.exception)
     return True
 
 
@@ -2798,6 +2798,7 @@ async def main():
     asyncio.create_task(check_renew_reminders())
 
     await bot.delete_webhook(drop_pending_updates=True)
+
     me = await bot.get_me()
     logger.info("BOT = @%s (%s)", me.username, me.id)
 
