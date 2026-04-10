@@ -1206,3 +1206,171 @@ async def admin_support_questions(callback: CallbackQuery):
     if not await require_admin(callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
+
+    rows = await get_open_questions("support")
+    if not rows:
+        await callback.message.answer("Открытых обращений в поддержку нет.")
+        await callback.answer()
+        return
+
+    text = "🛠 <b>Обращения в поддержку</b>\n\n"
+    for row in rows:
+        dt = row["created_at"].strftime('%d.%m.%Y %H:%M')
+        text += (
+            f"#{row['id']} | <code>{row['user_id']}</code>\n"
+            f"Имя: {row['full_name'] or '-'}\n"
+            f"Username: @{row['username'] if row['username'] else 'нет'}\n"
+            f"Дата: {dt}\n"
+            f"Текст: {row['text']}\n\n"
+        )
+
+    await callback.message.answer(text[:4000])
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_answer_user")
+async def admin_answer_user_start(callback: CallbackQuery, state: FSMContext):
+    if not await require_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.answer_user_id)
+    await callback.message.answer("Введите user_id пользователя, которому хочешь ответить:")
+    await callback.answer()
+
+
+@dp.message(AdminStates.answer_user_id)
+async def admin_answer_get_user_id(message: Message, state: FSMContext):
+    if not await require_admin(message.from_user.id):
+        return
+    try:
+        user_id = int(message.text.strip())
+    except Exception:
+        await message.answer("Нужен числовой user_id.")
+        return
+
+    await state.update_data(answer_user_id=user_id)
+    await state.set_state(AdminStates.answer_text)
+    await message.answer("Теперь отправь текст ответа пользователю:")
+
+
+@dp.message(AdminStates.answer_text)
+async def admin_answer_send(message: Message, state: FSMContext):
+    if not await require_admin(message.from_user.id):
+        return
+
+    data = await state.get_data()
+    user_id = data["answer_user_id"]
+    answer_text = message.html_text or message.text or ""
+
+    try:
+        await bot.send_message(
+            user_id,
+            f"👨‍💼 <b>Администратор</b>\n\n{answer_text}"
+        )
+        await close_questions_by_user(user_id, "content")
+        await close_questions_by_user(user_id, "support")
+        await message.answer(f"✅ Ответ отправлен пользователю <code>{user_id}</code>.")
+    except Exception as e:
+        await message.answer(f"Не удалось отправить ответ.\nОшибка: <code>{e}</code>")
+
+    await state.clear()
+
+
+# ================= ДОП КОМАНДЫ =================
+@dp.message(Command("dbtest"))
+async def dbtest(message: Message):
+    if not await require_admin(message.from_user.id):
+        await message.answer("Нет доступа")
+        return
+
+    async with db_pool.acquire() as conn:
+        now_db = await conn.fetchval("SELECT NOW()")
+        users_count = await conn.fetchval("SELECT COUNT(*) FROM users")
+        questions_count = await conn.fetchval("SELECT COUNT(*) FROM questions")
+        admins_count = await conn.fetchval("SELECT COUNT(*) FROM admins")
+
+    await message.answer(
+        f"✅ Neon работает\n\n"
+        f"Время БД: <b>{now_db}</b>\n"
+        f"Пользователей: <b>{users_count}</b>\n"
+        f"Вопросов: <b>{questions_count}</b>\n"
+        f"Доп. админов: <b>{admins_count}</b>"
+    )
+
+
+# ================= ФОНОВАЯ ПРОВЕРКА =================
+async def check_subs():
+    logger.info("CHECK_SUBS: started")
+    while True:
+        try:
+            async with db_pool.acquire() as conn:
+                rows = await conn.fetch("SELECT user_id, expire_date FROM users WHERE expire_date IS NOT NULL")
+
+            now = datetime.now()
+            for row in rows:
+                if row["expire_date"] < now:
+                    try:
+                        await bot.ban_chat_member(CHANNEL_ID, row["user_id"])
+                        await bot.unban_chat_member(CHANNEL_ID, row["user_id"])
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.exception("CHECK_SUBS ERROR: %s", e)
+
+        await asyncio.sleep(60)
+
+
+# ================= WEB =================
+async def handle(request):
+    logger.info("WEB: healthcheck hit")
+    return web.Response(text="OK")
+
+
+async def start_web():
+    logger.info("WEB: start")
+    app = web.Application()
+    app.router.add_get("/", handle)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    port = int(os.getenv("PORT", 10000))
+    logger.info("WEB: binding port %s", port)
+
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    logger.info("WEB STARTED ON PORT %s", port)
+
+
+# ================= ЗАПУСК =================
+async def main():
+    logger.info("MAIN: start")
+
+    if not BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN не задан")
+    if not PAYMENTS_TOKEN:
+        raise RuntimeError("PAYMENTS_TOKEN не задан")
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL не задан")
+
+    logger.info("MAIN: BOT_TOKEN exists = %s", bool(BOT_TOKEN))
+    logger.info("MAIN: PAYMENTS_TOKEN exists = %s", bool(PAYMENTS_TOKEN))
+    logger.info("MAIN: DATABASE_URL exists = %s", bool(DATABASE_URL))
+
+    await init_db()
+    await start_web()
+
+    logger.info("MAIN: starting background task check_subs")
+    asyncio.create_task(check_subs())
+
+    logger.info("MAIN: deleting webhook")
+    await bot.delete_webhook(drop_pending_updates=True)
+
+    logger.info("MAIN: start polling")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
