@@ -161,141 +161,23 @@ DEFAULT_GUIDES = {
         "2. Видит кнопку «Начать»\n"
         "3. После нажатия открывается стартовое сообщение\n"
         "4. Снизу всегда есть «🏠 Меню»\n"
-        "5. У админа дополнительно есть «⚙️ Админка»\n\n"
-        "Настройки:\n"
-        "• стартовый текст — «Контент бота»\n"
-        "• стартовое фото/видео — «Контент бота»\n"
-        "• видимые кнопки — «Кнопки стартового сообщения»"
+        "5. У админа дополнительно есть «⚙️ Админка»"
     ),
-    "start_buttons": (
-        "🔘 <b>Гайд: кнопки стартового сообщения</b>\n\n"
-        "Можно отдельно включать и выключать:\n"
-        "• Купить доступ\n"
-        "• Тарифы\n"
-        "• Поделиться\n"
-        "• Поддержка\n"
-        "• Оферта\n"
-        "• Промокод\n"
-        "• Моя подписка после покупки\n"
-        "• Пользовательские кнопки"
-    ),
-    "tariffs": (
-        "💳 <b>Гайд: тарифы</b>\n\n"
-        "Формат редактирования:\n"
-        "<code>Название | цена_в_рублях | дни | active(1/0) | pseudo(off/choice/default_on)</code>\n\n"
-        "pseudo:\n"
-        "• off — без напоминания\n"
-        "• choice — пользователь выбирает сам\n"
-        "• default_on — напоминание включено по умолчанию"
-    ),
-    "offer": (
-        "🛡 <b>Гайд: оферта</b>\n\n"
-        "Настройки:\n"
-        "• До оплаты — показывать до выбора тарифа\n"
-        "• После оплаты — отправлять после оплаты\n"
-        "• Требовать согласие — без подтверждения не пускать к оплате"
-    ),
-    "funnel": (
-        "🪄 <b>Гайд: воронка</b>\n\n"
-        "Воронка — это автосообщения тем, кто зашёл, но не купил.\n"
-        "У каждого шага есть:\n"
-        "• включение\n"
-        "• задержка в часах\n"
-        "• текст\n"
-        "• фото/видео"
-    ),
-    "promo": (
-        "🎁 <b>Гайд: промокоды</b>\n\n"
-        "Форматы:\n"
-        "<code>CODE | percent | 10 | 0 | 0 | 30</code>\n"
-        "<code>CODE | amount | 500 | 1 | 100 | 10</code>"
-    ),
-    "referral": (
-        "👥 <b>Гайд: рефералка</b>\n\n"
-        "Пользователь получает ссылку через «Поделиться».\n"
-        "Если приглашённый оплачивает доступ — пригласившему начисляются бонусные дни."
-    ),
-    "custom": (
-        "🧩 <b>Гайд: пользовательские кнопки и подменю</b>\n\n"
-        "У кнопки есть:\n"
-        "• ID\n"
-        "• название\n"
-        "• текст сообщения\n"
-        "• фото/видео\n"
-        "• родительская кнопка\n"
-        "• порядок\n"
-        "• включение"
-    ),
-    "broadcast": (
-        "📨 <b>Гайд: рассылки</b>\n\n"
-        "Есть 2 вида:\n"
-        "• текст\n"
-        "• фото/видео с подписью"
-    ),
-    "manual": (
-        "⚙️ <b>Гайд: ручное управление</b>\n\n"
-        "Можно вручную:\n"
-        "• выдать подписку\n"
-        "• снять подписку\n"
-        "• отправить ссылку\n"
-        "Во всех полях можно использовать user_id или @username"
-    ),
-    "logs": (
-        "🧾 <b>Гайд: логи и статистика</b>\n\n"
-        "Статистика нужна для понимания продаж.\n"
-        "Логи — для проверки действий пользователя."
-    ),
-    "troubleshoot": (
-        "🛠 <b>Гайд: если что-то не работает</b>\n\n"
-        "1. Проверь /start\n"
-        "2. Проверь токены\n"
-        "3. Проверь базу\n"
-        "4. Проверь права бота в канале\n"
-        "5. Если действие зависло — жми «⬅️ Назад», «🏠 Меню» или «♻️ Сбросить текущее действие»"
-    ),
-    "faq": (
-        "❓ <b>FAQ для админа/менеджера</b>\n\n"
-        "Q: Почему не приходит счёт?\nA: Проверь PAYMENTS_TOKEN.\n\n"
-        "Q: Почему не заходит в канал?\nA: Проверь права бота и CHANNEL_ID.\n\n"
-        "Q: Почему не ищет @username?\nA: Пользователь должен хотя бы раз написать боту."
-    ),
-    "recommended": (
-        "⭐ <b>Рекомендуемые настройки</b>\n\n"
-        "Быстрый старт:\n"
-        "• 1 тариф\n"
-        "• кнопки: купить, тарифы, поделиться, поддержка\n"
-        "• 1 шаг воронки\n\n"
-        "Жёсткая продажа:\n"
-        "• оферта до оплаты\n"
-        "• 2–3 шага воронки\n"
-        "• активные промокоды\n\n"
-        "Мягкая воронка:\n"
-        "• без обязательной оферты до оплаты\n"
-        "• 1–2 шага воронки\n"
-        "• упор на поддержку"
-    ),
-    "one_or_three": (
-        "🧭 <b>Один тариф / три тарифа</b>\n\n"
-        "Один тариф:\n"
-        "• включить только тариф 1\n"
-        "• можно оставить кнопку «Купить доступ»\n\n"
-        "Три тарифа:\n"
-        "• включить кнопку «Тарифы»\n"
-        "• показать различия по цене/сроку"
-    ),
-    "ads_checklist": (
-        "📋 <b>Чек-лист перед запуском рекламы</b>\n\n"
-        "1. Проверить /start\n"
-        "2. Проверить покупку\n"
-        "3. Проверить ссылку в канал\n"
-        "4. Проверить кнопки\n"
-        "5. Проверить оферту\n"
-        "6. Проверить воронку\n"
-        "7. Проверить промокод\n"
-        "8. Проверить рефералку\n"
-        "9. Проверить диагностику\n"
-        "10. Проверить статистику"
-    ),
+    "start_buttons": "🔘 <b>Гайд: кнопки стартового сообщения</b>",
+    "tariffs": "💳 <b>Гайд: тарифы</b>",
+    "offer": "🛡 <b>Гайд: оферта</b>",
+    "funnel": "🪄 <b>Гайд: воронка</b>",
+    "promo": "🎁 <b>Гайд: промокоды</b>",
+    "referral": "👥 <b>Гайд: рефералка</b>",
+    "custom": "🧩 <b>Гайд: пользовательские кнопки</b>",
+    "broadcast": "📨 <b>Гайд: рассылки</b>",
+    "manual": "⚙️ <b>Гайд: ручное управление</b>",
+    "logs": "🧾 <b>Гайд: логи и статистика</b>",
+    "troubleshoot": "🛠 <b>Гайд: если что-то не работает</b>",
+    "faq": "❓ <b>FAQ</b>",
+    "recommended": "⭐ <b>Рекомендуемые настройки</b>",
+    "one_or_three": "🧭 <b>Один тариф / три тарифа</b>",
+    "ads_checklist": "📋 <b>Чек-лист рекламы</b>",
 }
 
 BTN_BEGIN = "🚀 Начать"
@@ -316,58 +198,42 @@ db_pool: Optional[asyncpg.Pool] = None
 class AdminStates(StatesGroup):
     set_start_text = State()
     set_start_media = State()
-
     edit_tariff_data = State()
-
     set_offer_text = State()
     set_offer_media = State()
-
     set_share_text = State()
     set_share_media = State()
-
     set_homework_text = State()
     set_homework_media = State()
-
     set_funnel_time = State()
     set_funnel_step_text = State()
     set_funnel_step_media = State()
     set_funnel_step_delay = State()
-
     promo_create = State()
     promo_delete = State()
-
     answer_pick_user = State()
     answer_message = State()
-
     manual_add_sub_user = State()
     manual_add_sub_days = State()
     manual_remove_sub_user = State()
     manual_invite_user = State()
-
     find_user = State()
     logs_user = State()
-
     broadcast_text = State()
     broadcast_media_caption = State()
     broadcast_media_file = State()
-
     set_reminders = State()
-
     add_admin_user = State()
     remove_admin_user = State()
-
     refcfg = State()
-
     custom_node_title = State()
     custom_node_text = State()
     custom_node_media = State()
     custom_node_parent = State()
     custom_node_sort = State()
     custom_node_toggle = State()
-
     guide_edit_pick_key = State()
     guide_edit_text = State()
-
     diagnostic_user = State()
     diagnostic_kick_user = State()
     diagnostic_invite_user = State()
@@ -542,6 +408,22 @@ async def init_db():
                 created_at TIMESTAMP NOT NULL DEFAULT NOW(),
                 status TEXT NOT NULL DEFAULT 'open'
             );
+        """)
+        await conn.execute("""
+            ALTER TABLE IF EXISTS questions
+            ALTER COLUMN text DROP NOT NULL;
+        """)
+        await conn.execute("""
+            ALTER TABLE IF EXISTS questions
+            ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'text';
+        """)
+        await conn.execute("""
+            ALTER TABLE IF EXISTS questions
+            ADD COLUMN IF NOT EXISTS file_id TEXT;
+        """)
+        await conn.execute("""
+            ALTER TABLE IF EXISTS questions
+            ADD COLUMN IF NOT EXISTS caption TEXT;
         """)
 
         await conn.execute("""
@@ -1267,6 +1149,10 @@ async def send_payload(chat_id: int, payload: dict, prefix: Optional[str] = None
 
 
 async def save_question(user_id: int, username: Optional[str], full_name: Optional[str], q_type: str, payload: dict):
+    text_value = payload.get("text")
+    if text_value is None:
+        text_value = ""
+
     async with get_pool().acquire() as conn:
         return await conn.fetchval(
             """
@@ -1278,7 +1164,7 @@ async def save_question(user_id: int, username: Optional[str], full_name: Option
             username,
             full_name,
             q_type,
-            payload.get("text"),
+            text_value,
             payload.get("content_type", "text"),
             payload.get("file_id"),
             payload.get("caption"),
@@ -3330,7 +3216,7 @@ async def admin_custom_menu(callback: CallbackQuery):
     text += "— название\n"
     text += "— текст сообщения\n"
     text += "— фото/видео\n"
-    text += "— родительскую кнопку (чтобы стать пунктом подменю)\n"
+    text += "— родительскую кнопку\n"
     text += "— порядок отображения\n\n"
     if rows:
         text += "Корневые кнопки:\n"
