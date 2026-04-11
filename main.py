@@ -1093,18 +1093,72 @@ def admin_guides_kb():
 
 
 async def extract_payload_from_message(message: Message):
+    text_value = message.html_text or message.text or message.caption or ""
+
     if message.text:
-        return {"content_type": "text", "text": message.html_text or message.text, "file_id": None, "caption": None}
+        return {
+            "content_type": "text",
+            "text": text_value,
+            "file_id": None,
+            "caption": None,
+        }
+
     if message.photo:
-        return {"content_type": "photo", "text": None, "file_id": message.photo[-1].file_id, "caption": message.html_text or message.caption}
+        return {
+            "content_type": "photo",
+            "text": None,
+            "file_id": message.photo[-1].file_id,
+            "caption": text_value,
+        }
+
     if message.video:
-        return {"content_type": "video", "text": None, "file_id": message.video.file_id, "caption": message.html_text or message.caption}
+        return {
+            "content_type": "video",
+            "text": None,
+            "file_id": message.video.file_id,
+            "caption": text_value,
+        }
+
     if message.voice:
-        return {"content_type": "voice", "text": None, "file_id": message.voice.file_id, "caption": message.html_text or message.caption}
+        return {
+            "content_type": "voice",
+            "text": None,
+            "file_id": message.voice.file_id,
+            "caption": text_value,
+        }
+
     if message.video_note:
-        return {"content_type": "video_note", "text": None, "file_id": message.video_note.file_id, "caption": None}
+        return {
+            "content_type": "video_note",
+            "text": None,
+            "file_id": message.video_note.file_id,
+            "caption": None,
+        }
+
     if message.document:
-        return {"content_type": "document", "text": None, "file_id": message.document.file_id, "caption": message.html_text or message.caption}
+        return {
+            "content_type": "document",
+            "text": None,
+            "file_id": message.document.file_id,
+            "caption": text_value,
+        }
+
+    if message.audio:
+        return {
+            "content_type": "audio",
+            "text": None,
+            "file_id": message.audio.file_id,
+            "caption": text_value,
+        }
+
+    if message.animation:
+        return {
+            "content_type": "animation",
+            "text": None,
+            "file_id": message.animation.file_id,
+            "caption": text_value,
+        }
+
     return None
 
 
@@ -1136,10 +1190,9 @@ async def send_payload(chat_id: int, payload: dict, prefix: Optional[str] = None
         return
 
     if content_type == "voice":
-        cap = caption or ""
         if prefix:
             await bot.send_message(chat_id, prefix)
-        await bot.send_voice(chat_id, voice=file_id, caption=cap or None, reply_markup=reply_markup)
+        await bot.send_voice(chat_id, voice=file_id, caption=(caption or None), reply_markup=reply_markup)
         return
 
     if content_type == "video_note":
@@ -1157,7 +1210,21 @@ async def send_payload(chat_id: int, payload: dict, prefix: Optional[str] = None
         await bot.send_document(chat_id, document=file_id, caption=cap or None, reply_markup=reply_markup)
         return
 
-    await bot.send_message(chat_id, prefix or "Сообщение")
+    if content_type == "audio":
+        cap = caption or ""
+        if prefix:
+            cap = f"{prefix}\n\n{cap}" if cap else prefix
+        await bot.send_audio(chat_id, audio=file_id, caption=cap or None, reply_markup=reply_markup)
+        return
+
+    if content_type == "animation":
+        cap = caption or ""
+        if prefix:
+            cap = f"{prefix}\n\n{cap}" if cap else prefix
+        await bot.send_animation(chat_id, animation=file_id, caption=cap or None, reply_markup=reply_markup)
+        return
+
+    await bot.send_message(chat_id, prefix or "Сообщение не удалось обработать")
 
 
 async def save_question(user_id: int, username: Optional[str], full_name: Optional[str], q_type: str, payload: dict):
@@ -1620,7 +1687,7 @@ async def support_open(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UserStates.support_message)
     is_admin_user = await is_admin(callback.from_user.id)
     await callback.message.answer(
-        "Отправь сообщение в поддержку: текст, фото, видео, voice, кружок или документ.\n\nНажми «⬅️ Назад» для выхода.",
+        "Отправь сообщение в поддержку: текст, фото, видео, голосовое, кружок, файл, аудио или GIF.\n\nНажми «⬅️ Назад» для выхода.",
         reply_markup=reply_back_kb(is_admin_user),
     )
     await callback.answer()
@@ -1631,7 +1698,7 @@ async def ask_content(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UserStates.question_content)
     is_admin_user = await is_admin(callback.from_user.id)
     await callback.message.answer(
-        "Отправь вопрос по контенту: текст, фото, видео, voice, кружок или документ.\n\nНажми «⬅️ Назад» для выхода.",
+        "Отправь вопрос по контенту: текст, фото, видео, голосовое, кружок, файл, аудио или GIF.\n\nНажми «⬅️ Назад» для выхода.",
         reply_markup=reply_back_kb(is_admin_user),
     )
     await callback.answer()
@@ -1652,8 +1719,26 @@ async def ask_homework(callback: CallbackQuery, state: FSMContext):
 
 async def process_user_message_to_admin(message: Message, state: FSMContext, q_type: str, title: str):
     payload = await extract_payload_from_message(message)
+
     if not payload:
-        await message.answer("Этот тип сообщения пока не поддерживается.")
+        await message.answer(
+            "Этот тип сообщения пока не поддерживается.\n\n"
+            "Поддерживаются:\n"
+            "• текст\n"
+            "• фото\n"
+            "• видео\n"
+            "• голосовое\n"
+            "• кружок\n"
+            "• файл\n"
+            "• аудио\n"
+            "• GIF",
+            reply_markup=reply_back_kb(await is_admin(message.from_user.id)),
+        )
+        await log_action(
+            message.from_user.id,
+            f"question_{q_type}_unsupported",
+            f"message_content_type={getattr(message, 'content_type', 'unknown')}",
+        )
         return
 
     qid = await save_question(
@@ -1669,7 +1754,8 @@ async def process_user_message_to_admin(message: Message, state: FSMContext, q_t
         f"ID: <code>{message.from_user.id}</code>\n"
         f"Имя: {message.from_user.full_name}\n"
         f"Username: @{message.from_user.username if message.from_user.username else 'нет'}\n"
-        f"Тип: <b>{q_type}</b>\n"
+        f"Тип обращения: <b>{q_type}</b>\n"
+        f"Тип файла: <b>{payload.get('content_type')}</b>\n"
         f"Question ID: <b>{qid}</b>"
     )
 
@@ -1679,9 +1765,14 @@ async def process_user_message_to_admin(message: Message, state: FSMContext, q_t
         prefix=prefix,
         reply_markup=admin_question_reply_kb(qid, message.from_user.id, q_type),
     )
-    await message.answer("✅ Сообщение отправлено администратору.", reply_markup=reply_menu_kb(await is_admin(message.from_user.id)))
+
+    await message.answer(
+        "✅ Сообщение отправлено администратору.",
+        reply_markup=reply_menu_kb(await is_admin(message.from_user.id)),
+    )
+
     await state.clear()
-    await log_action(message.from_user.id, f"question_{q_type}", f"qid={qid}")
+    await log_action(message.from_user.id, f"question_{q_type}", f"qid={qid};content_type={payload.get('content_type')}")
 
 
 @dp.message(UserStates.support_message)
@@ -2402,7 +2493,7 @@ async def replyq_callback(callback: CallbackQuery, state: FSMContext):
     await state.set_state(AdminStates.answer_message)
     await callback.message.answer(
         f"Ответ пользователю <code>{user_id}</code>.\n"
-        "Отправь текст, фото, видео, voice, кружок или документ.",
+        "Отправь текст, фото, видео, голосовое, кружок, файл, аудио или GIF.",
         reply_markup=reply_back_kb(True),
     )
     await callback.answer()
@@ -2416,7 +2507,7 @@ async def admin_answer_pick_user_finish(message: Message, state: FSMContext):
         return
     await state.update_data(answer_user_id=user_id)
     await state.set_state(AdminStates.answer_message)
-    await message.answer("Отправь ответ: текст, фото, видео, voice, кружок или документ.", reply_markup=reply_back_kb(True))
+    await message.answer("Отправь ответ: текст, фото, видео, голосовое, кружок, файл, аудио или GIF.", reply_markup=reply_back_kb(True))
 
 
 @dp.message(AdminStates.answer_message)
