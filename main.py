@@ -1093,6 +1093,20 @@ def admin_guides_kb():
 
 
 async def extract_payload_from_message(message: Message):
+    logger.info(
+        "EXTRACT PAYLOAD: user_id=%s content_type=%s text=%s has_photo=%s has_video=%s has_voice=%s has_video_note=%s has_document=%s has_audio=%s has_animation=%s",
+        message.from_user.id if message.from_user else None,
+        getattr(message, "content_type", None),
+        bool(message.text),
+        bool(message.photo),
+        bool(message.video),
+        bool(message.voice),
+        bool(message.video_note),
+        bool(message.document),
+        bool(message.audio),
+        bool(message.animation),
+    )
+
     text_value = message.html_text or message.text or message.caption or ""
 
     if message.text:
@@ -1159,6 +1173,11 @@ async def extract_payload_from_message(message: Message):
             "caption": text_value,
         }
 
+    logger.warning(
+        "EXTRACT PAYLOAD UNSUPPORTED: user_id=%s content_type=%s",
+        message.from_user.id if message.from_user else None,
+        getattr(message, "content_type", None),
+    )
     return None
 
 
@@ -1168,63 +1187,83 @@ async def send_payload(chat_id: int, payload: dict, prefix: Optional[str] = None
     file_id = payload.get("file_id")
     caption = payload.get("caption")
 
-    if content_type == "text":
-        body = text or ""
-        if prefix:
-            body = f"{prefix}\n\n{body}" if body else prefix
-        await bot.send_message(chat_id, body or "—", reply_markup=reply_markup)
-        return
+    logger.info(
+        "SEND PAYLOAD: chat_id=%s content_type=%s has_text=%s has_file=%s has_caption=%s",
+        chat_id,
+        content_type,
+        bool(text),
+        bool(file_id),
+        bool(caption),
+    )
 
-    if content_type == "photo":
-        cap = caption or ""
-        if prefix:
-            cap = f"{prefix}\n\n{cap}" if cap else prefix
-        await bot.send_photo(chat_id, photo=file_id, caption=cap or None, reply_markup=reply_markup)
-        return
+    try:
+        if content_type == "text":
+            body = text or ""
+            if prefix:
+                body = f"{prefix}\n\n{body}" if body else prefix
+            await bot.send_message(chat_id, body or "—", reply_markup=reply_markup)
+            return
 
-    if content_type == "video":
-        cap = caption or ""
-        if prefix:
-            cap = f"{prefix}\n\n{cap}" if cap else prefix
-        await bot.send_video(chat_id, video=file_id, caption=cap or None, reply_markup=reply_markup)
-        return
+        if content_type == "photo":
+            cap = caption or ""
+            if prefix:
+                cap = f"{prefix}\n\n{cap}" if cap else prefix
+            await bot.send_photo(chat_id, photo=file_id, caption=cap or None, reply_markup=reply_markup)
+            return
 
-    if content_type == "voice":
-        if prefix:
-            await bot.send_message(chat_id, prefix)
-        await bot.send_voice(chat_id, voice=file_id, caption=(caption or None), reply_markup=reply_markup)
-        return
+        if content_type == "video":
+            cap = caption or ""
+            if prefix:
+                cap = f"{prefix}\n\n{cap}" if cap else prefix
+            await bot.send_video(chat_id, video=file_id, caption=cap or None, reply_markup=reply_markup)
+            return
 
-    if content_type == "video_note":
-        if prefix:
-            await bot.send_message(chat_id, prefix)
-        await bot.send_video_note(chat_id, video_note=file_id)
-        if reply_markup:
-            await bot.send_message(chat_id, "Действия:", reply_markup=reply_markup)
-        return
+        if content_type == "voice":
+            if prefix:
+                await bot.send_message(chat_id, prefix)
+            await bot.send_voice(chat_id, voice=file_id, caption=(caption or None), reply_markup=reply_markup)
+            return
 
-    if content_type == "document":
-        cap = caption or ""
-        if prefix:
-            cap = f"{prefix}\n\n{cap}" if cap else prefix
-        await bot.send_document(chat_id, document=file_id, caption=cap or None, reply_markup=reply_markup)
-        return
+        if content_type == "video_note":
+            if prefix:
+                await bot.send_message(chat_id, prefix)
+            await bot.send_video_note(chat_id, video_note=file_id)
+            if reply_markup:
+                await bot.send_message(chat_id, "Действия:", reply_markup=reply_markup)
+            return
 
-    if content_type == "audio":
-        cap = caption or ""
-        if prefix:
-            cap = f"{prefix}\n\n{cap}" if cap else prefix
-        await bot.send_audio(chat_id, audio=file_id, caption=cap or None, reply_markup=reply_markup)
-        return
+        if content_type == "document":
+            cap = caption or ""
+            if prefix:
+                cap = f"{prefix}\n\n{cap}" if cap else prefix
+            await bot.send_document(chat_id, document=file_id, caption=cap or None, reply_markup=reply_markup)
+            return
 
-    if content_type == "animation":
-        cap = caption or ""
-        if prefix:
-            cap = f"{prefix}\n\n{cap}" if cap else prefix
-        await bot.send_animation(chat_id, animation=file_id, caption=cap or None, reply_markup=reply_markup)
-        return
+        if content_type == "audio":
+            cap = caption or ""
+            if prefix:
+                cap = f"{prefix}\n\n{cap}" if cap else prefix
+            await bot.send_audio(chat_id, audio=file_id, caption=cap or None, reply_markup=reply_markup)
+            return
 
-    await bot.send_message(chat_id, prefix or "Сообщение не удалось обработать")
+        if content_type == "animation":
+            cap = caption or ""
+            if prefix:
+                cap = f"{prefix}\n\n{cap}" if cap else prefix
+            await bot.send_animation(chat_id, animation=file_id, caption=cap or None, reply_markup=reply_markup)
+            return
+
+        logger.warning("SEND PAYLOAD UNKNOWN TYPE: chat_id=%s content_type=%s", chat_id, content_type)
+        await bot.send_message(chat_id, prefix or "Сообщение не удалось обработать")
+
+    except Exception as e:
+        logger.exception(
+            "SEND PAYLOAD ERROR: chat_id=%s content_type=%s error=%s",
+            chat_id,
+            content_type,
+            e,
+        )
+        raise
 
 
 async def save_question(user_id: int, username: Optional[str], full_name: Optional[str], q_type: str, payload: dict):
@@ -1415,9 +1454,20 @@ async def send_invoice_for_tariff(user_id: int, tariff_id: int, pseudo_autorenew
     tariff = await get_tariff_by_id(tariff_id)
     if not tariff or not tariff.get("active"):
         await bot.send_message(user_id, "Тариф недоступен.")
+        logger.error("INVOICE ERROR: tariff not found or inactive | user_id=%s tariff_id=%s", user_id, tariff_id)
         return
 
     final_price, promo_code = await apply_promo_price(user_id, tariff)
+
+    logger.info(
+        "INVOICE PREPARE: user_id=%s tariff_id=%s pseudo=%s price=%s promo=%s provider_exists=%s",
+        user_id,
+        tariff_id,
+        pseudo_autorenew,
+        final_price,
+        promo_code,
+        bool(PAYMENTS_TOKEN),
+    )
 
     async with get_pool().acquire() as conn:
         await conn.execute(
@@ -1436,16 +1486,26 @@ async def send_invoice_for_tariff(user_id: int, tariff_id: int, pseudo_autorenew
     if promo_code:
         label += f" / promo {promo_code}"
 
-    await bot.send_invoice(
-        chat_id=user_id,
-        title=f"Доступ: {tariff['name']}",
-        description=f"Тариф {tariff['name']} на {tariff['days']} дней",
-        payload=f"tariff:{tariff_id}:{1 if pseudo_autorenew else 0}",
-        provider_token=PAYMENTS_TOKEN,
-        currency="RUB",
-        prices=[LabeledPrice(label=label, amount=final_price)],
-        start_parameter=f"tariff_{tariff_id}",
-    )
+    try:
+        await bot.send_invoice(
+            chat_id=user_id,
+            title=f"Доступ: {tariff['name']}",
+            description=f"Тариф {tariff['name']} на {tariff['days']} дней",
+            payload=f"tariff:{tariff_id}:{1 if pseudo_autorenew else 0}",
+            provider_token=PAYMENTS_TOKEN,
+            currency="RUB",
+            prices=[LabeledPrice(label=label, amount=final_price)],
+            start_parameter=f"tariff_{tariff_id}",
+        )
+        logger.info("INVOICE SENT OK: user_id=%s tariff_id=%s", user_id, tariff_id)
+    except Exception as e:
+        logger.exception("INVOICE SEND ERROR: %s", e)
+        await bot.send_message(
+            user_id,
+            f"❌ Не удалось открыть оплату.\nОшибка: <code>{e}</code>"
+        )
+        return
+
     await log_action(user_id, "invoice_sent", f"tariff={tariff_id};reminder={pseudo_autorenew};price={final_price}")
 
 
@@ -1718,6 +1778,13 @@ async def ask_homework(callback: CallbackQuery, state: FSMContext):
 
 
 async def process_user_message_to_admin(message: Message, state: FSMContext, q_type: str, title: str):
+    logger.info(
+        "PROCESS USER MESSAGE START: user_id=%s q_type=%s content_type=%s",
+        message.from_user.id if message.from_user else None,
+        q_type,
+        getattr(message, "content_type", None),
+    )
+
     payload = await extract_payload_from_message(message)
 
     if not payload:
@@ -1739,7 +1806,20 @@ async def process_user_message_to_admin(message: Message, state: FSMContext, q_t
             f"question_{q_type}_unsupported",
             f"message_content_type={getattr(message, 'content_type', 'unknown')}",
         )
+        logger.warning(
+            "PROCESS USER MESSAGE UNSUPPORTED: user_id=%s q_type=%s content_type=%s",
+            message.from_user.id if message.from_user else None,
+            q_type,
+            getattr(message, "content_type", None),
+        )
         return
+
+    logger.info(
+        "PROCESS USER MESSAGE PAYLOAD OK: user_id=%s q_type=%s payload_type=%s",
+        message.from_user.id if message.from_user else None,
+        q_type,
+        payload.get("content_type"),
+    )
 
     qid = await save_question(
         user_id=message.from_user.id,
@@ -1747,6 +1827,14 @@ async def process_user_message_to_admin(message: Message, state: FSMContext, q_t
         full_name=message.from_user.full_name,
         q_type=q_type,
         payload=payload,
+    )
+
+    logger.info(
+        "QUESTION SAVED: user_id=%s qid=%s q_type=%s payload_type=%s",
+        message.from_user.id if message.from_user else None,
+        qid,
+        q_type,
+        payload.get("content_type"),
     )
 
     prefix = (
@@ -1759,12 +1847,34 @@ async def process_user_message_to_admin(message: Message, state: FSMContext, q_t
         f"Question ID: <b>{qid}</b>"
     )
 
-    await send_payload(
-        ADMIN_ID,
-        payload,
-        prefix=prefix,
-        reply_markup=admin_question_reply_kb(qid, message.from_user.id, q_type),
-    )
+    try:
+        await send_payload(
+            ADMIN_ID,
+            payload,
+            prefix=prefix,
+            reply_markup=admin_question_reply_kb(qid, message.from_user.id, q_type),
+        )
+        logger.info(
+            "QUESTION FORWARDED TO ADMIN: user_id=%s qid=%s q_type=%s payload_type=%s",
+            message.from_user.id if message.from_user else None,
+            qid,
+            q_type,
+            payload.get("content_type"),
+        )
+    except Exception as e:
+        logger.exception(
+            "QUESTION FORWARD ERROR: user_id=%s qid=%s q_type=%s payload_type=%s error=%s",
+            message.from_user.id if message.from_user else None,
+            qid,
+            q_type,
+            payload.get("content_type"),
+            e,
+        )
+        await message.answer(
+            "❌ Не удалось отправить сообщение администратору. Попробуй ещё раз позже.",
+            reply_markup=reply_menu_kb(await is_admin(message.from_user.id)),
+        )
+        return
 
     await message.answer(
         "✅ Сообщение отправлено администратору.",
@@ -1998,6 +2108,78 @@ async def admin_cmd(message: Message):
         return
     await message.answer("⚙️ <b>Админка</b>", reply_markup=admin_kb())
     await message.answer("Нижнее меню обновлено.", reply_markup=reply_menu_kb(True))
+
+
+@dp.message(Command("dbtest"))
+async def dbtest(message: Message):
+    if not await is_admin(message.from_user.id):
+        await message.answer("Нет доступа")
+        return
+    async with get_pool().acquire() as conn:
+        now_db = await conn.fetchval("SELECT NOW()")
+        users_cnt = await conn.fetchval("SELECT COUNT(*) FROM users")
+        q_cnt = await conn.fetchval("SELECT COUNT(*) FROM questions")
+        p_cnt = await conn.fetchval("SELECT COUNT(*) FROM promo_codes")
+        a_cnt = await conn.fetchval("SELECT COUNT(*) FROM admins")
+        c_cnt = await conn.fetchval("SELECT COUNT(*) FROM custom_nodes")
+    await message.answer(
+        f"✅ DB OK\n\n"
+        f"NOW(): <b>{now_db}</b>\n"
+        f"users: <b>{users_cnt}</b>\n"
+        f"questions: <b>{q_cnt}</b>\n"
+        f"promo: <b>{p_cnt}</b>\n"
+        f"extra_admins: <b>{a_cnt}</b>\n"
+        f"custom_nodes: <b>{c_cnt}</b>"
+    )
+
+
+@dp.message(Command("paytest"))
+async def paytest(message: Message):
+    if not await is_admin(message.from_user.id):
+        await message.answer("Нет доступа")
+        return
+
+    tariffs = await get_tariffs()
+    tariff = None
+    for t in tariffs:
+        if t.get("active"):
+            tariff = t
+            break
+
+    if not tariff:
+        await message.answer("Нет активного тарифа.")
+        return
+
+    try:
+        logger.info(
+            "PAYTEST START: user_id=%s tariff_id=%s price=%s provider_exists=%s",
+            message.from_user.id,
+            tariff["id"],
+            tariff["price_kop"],
+            bool(PAYMENTS_TOKEN),
+        )
+
+        await bot.send_message(
+            message.from_user.id,
+            "🧪 Тест оплаты: сейчас попробую отправить invoice..."
+        )
+
+        await bot.send_invoice(
+            chat_id=message.from_user.id,
+            title=f"Тест оплаты: {tariff['name']}",
+            description=f"Тестовый счёт на {tariff['days']} дней",
+            payload="test_payment",
+            provider_token=PAYMENTS_TOKEN,
+            currency="RUB",
+            prices=[LabeledPrice(label="Тестовый доступ", amount=int(tariff["price_kop"]))],
+            start_parameter="testpay"
+        )
+
+        logger.info("PAYTEST OK: user_id=%s", message.from_user.id)
+        await message.answer("✅ Тестовый invoice отправлен.")
+    except Exception as e:
+        logger.exception("PAYTEST ERROR: %s", e)
+        await message.answer(f"❌ Ошибка paytest:\n<code>{e}</code>")
 
 
 @dp.callback_query(F.data == "admin_force_reset")
@@ -4062,29 +4244,6 @@ async def guide_edit_text_finish(message: Message, state: FSMContext):
     await state.clear()
 
 
-@dp.message(Command("dbtest"))
-async def dbtest(message: Message):
-    if not await is_admin(message.from_user.id):
-        await message.answer("Нет доступа")
-        return
-    async with get_pool().acquire() as conn:
-        now_db = await conn.fetchval("SELECT NOW()")
-        users_cnt = await conn.fetchval("SELECT COUNT(*) FROM users")
-        q_cnt = await conn.fetchval("SELECT COUNT(*) FROM questions")
-        p_cnt = await conn.fetchval("SELECT COUNT(*) FROM promo_codes")
-        a_cnt = await conn.fetchval("SELECT COUNT(*) FROM admins")
-        c_cnt = await conn.fetchval("SELECT COUNT(*) FROM custom_nodes")
-    await message.answer(
-        f"✅ DB OK\n\n"
-        f"NOW(): <b>{now_db}</b>\n"
-        f"users: <b>{users_cnt}</b>\n"
-        f"questions: <b>{q_cnt}</b>\n"
-        f"promo: <b>{p_cnt}</b>\n"
-        f"extra_admins: <b>{a_cnt}</b>\n"
-        f"custom_nodes: <b>{c_cnt}</b>"
-    )
-
-
 async def check_subs():
     while True:
         try:
@@ -4259,6 +4418,8 @@ async def main():
         raise RuntimeError("DATABASE_URL не задан")
 
     logger.info("BOT_TOKEN prefix: %s", BOT_TOKEN[:15] if BOT_TOKEN else "EMPTY")
+    logger.info("PAYMENTS TOKEN EXISTS: %s", bool(PAYMENTS_TOKEN))
+    logger.info("DATABASE URL EXISTS: %s", bool(DATABASE_URL))
 
     await init_db()
     await start_web()
