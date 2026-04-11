@@ -157,163 +157,144 @@ DEFAULT_CUSTOM_NODE = {
 DEFAULT_GUIDES = {
     "start": (
         "🚀 <b>Гайд: старт и меню</b>\n\n"
-        "Как работает пользовательский путь:\n"
         "1. Пользователь нажимает /start\n"
         "2. Видит кнопку «Начать»\n"
         "3. После нажатия открывается стартовое сообщение\n"
-        "4. В стартовом сообщении показываются inline-кнопки\n"
-        "5. Снизу у пользователя всегда есть кнопка «🏠 Меню»\n"
-        "6. У админа снизу всегда есть «🏠 Меню» и «⚙️ Админка»\n\n"
-        "Что настраивать:\n"
-        "• стартовый текст — раздел «Контент бота»\n"
-        "• стартовое фото/видео — раздел «Контент бота»\n"
-        "• какие кнопки видны — раздел «Кнопки стартового сообщения»"
+        "4. Снизу всегда есть «🏠 Меню»\n"
+        "5. У админа дополнительно есть «⚙️ Админка»\n\n"
+        "Настройки:\n"
+        "• стартовый текст — «Контент бота»\n"
+        "• стартовое фото/видео — «Контент бота»\n"
+        "• видимые кнопки — «Кнопки стартового сообщения»"
     ),
     "start_buttons": (
         "🔘 <b>Гайд: кнопки стартового сообщения</b>\n\n"
-        "В этом разделе ты включаешь и выключаешь кнопки, которые видит пользователь в стартовом сообщении.\n\n"
-        "Что означает каждая кнопка:\n"
-        "• Купить доступ — переводит к покупке\n"
-        "• Тарифы — показывает доступные тарифы\n"
-        "• Поделиться — показывает реферальную ссылку\n"
-        "• Поддержка — открывает отправку сообщения в поддержку\n"
-        "• Оферта — вручную показывает оферту\n"
-        "• Промокод — открывает ввод промокода\n"
-        "• Моя подписка после покупки — появляется только у купивших\n"
-        "• Пользовательские кнопки — показывает твои собственные кнопки и подменю"
+        "Можно отдельно включать и выключать:\n"
+        "• Купить доступ\n"
+        "• Тарифы\n"
+        "• Поделиться\n"
+        "• Поддержка\n"
+        "• Оферта\n"
+        "• Промокод\n"
+        "• Моя подписка после покупки\n"
+        "• Пользовательские кнопки"
     ),
     "tariffs": (
         "💳 <b>Гайд: тарифы</b>\n\n"
-        "У тебя сейчас до 3 тарифов.\n"
-        "Каждый тариф имеет:\n"
-        "• название\n"
-        "• цену\n"
-        "• срок в днях\n"
-        "• активность\n"
-        "• режим напоминания о продлении\n\n"
         "Формат редактирования:\n"
-        "<code>Название | цена_в_рублях | дни | active(1/0) | pseudo(off/choice/default_on)</code>"
+        "<code>Название | цена_в_рублях | дни | active(1/0) | pseudo(off/choice/default_on)</code>\n\n"
+        "pseudo:\n"
+        "• off — без напоминания\n"
+        "• choice — пользователь выбирает сам\n"
+        "• default_on — напоминание включено по умолчанию"
     ),
     "offer": (
         "🛡 <b>Гайд: оферта</b>\n\n"
-        "Оферта может показываться:\n"
-        "• до оплаты\n"
-        "• после оплаты\n\n"
         "Настройки:\n"
-        "• До оплаты — показывать перед выбором тарифа\n"
-        "• После оплаты — отправлять после успешной оплаты\n"
-        "• Требовать согласие — без подтверждения пользователь не сможет перейти к оплате"
+        "• До оплаты — показывать до выбора тарифа\n"
+        "• После оплаты — отправлять после оплаты\n"
+        "• Требовать согласие — без подтверждения не пускать к оплате"
     ),
     "funnel": (
         "🪄 <b>Гайд: воронка</b>\n\n"
-        "Воронка — это автосообщения тем, кто зашёл в бота, но не оплатил.\n\n"
-        "Как работает:\n"
-        "• пользователь нажал «Начать»\n"
-        "• если он не купил, бот ждёт нужное время\n"
-        "• потом отправляет шаги"
+        "Воронка — это автосообщения тем, кто зашёл, но не купил.\n"
+        "У каждого шага есть:\n"
+        "• включение\n"
+        "• задержка в часах\n"
+        "• текст\n"
+        "• фото/видео"
     ),
     "promo": (
         "🎁 <b>Гайд: промокоды</b>\n\n"
-        "Промокод может давать:\n"
-        "• скидку в процентах\n"
-        "• фиксированную скидку в рублях\n\n"
-        "Можно ограничить:\n"
-        "• тариф\n"
-        "• число использований\n"
-        "• срок действия"
+        "Форматы:\n"
+        "<code>CODE | percent | 10 | 0 | 0 | 30</code>\n"
+        "<code>CODE | amount | 500 | 1 | 100 | 10</code>"
     ),
     "referral": (
         "👥 <b>Гайд: рефералка</b>\n\n"
-        "Как работает:\n"
-        "• пользователь получает свою ссылку через кнопку «Поделиться»\n"
-        "• другой человек заходит по этой ссылке\n"
-        "• после первой оплаты приглашённого первому начисляются бонусные дни"
+        "Пользователь получает ссылку через «Поделиться».\n"
+        "Если приглашённый оплачивает доступ — пригласившему начисляются бонусные дни."
     ),
     "custom": (
         "🧩 <b>Гайд: пользовательские кнопки и подменю</b>\n\n"
-        "У каждой кнопки есть:\n"
+        "У кнопки есть:\n"
         "• ID\n"
         "• название\n"
         "• текст сообщения\n"
         "• фото/видео\n"
         "• родительская кнопка\n"
-        "• порядок отображения\n"
-        "• включение/выключение"
+        "• порядок\n"
+        "• включение"
     ),
     "broadcast": (
         "📨 <b>Гайд: рассылки</b>\n\n"
-        "Есть 2 вида рассылок:\n"
-        "• только текст\n"
-        "• фото/видео с подписью\n\n"
-        "Сейчас рассылка идёт по всем пользователям из базы."
+        "Есть 2 вида:\n"
+        "• текст\n"
+        "• фото/видео с подписью"
     ),
     "manual": (
         "⚙️ <b>Гайд: ручное управление</b>\n\n"
-        "В этом разделе можно:\n"
-        "• вручную выдать подписку\n"
-        "• вручную снять подписку\n"
-        "• вручную отправить ссылку в канал"
+        "Можно вручную:\n"
+        "• выдать подписку\n"
+        "• снять подписку\n"
+        "• отправить ссылку\n"
+        "Во всех полях можно использовать user_id или @username"
     ),
     "logs": (
         "🧾 <b>Гайд: логи и статистика</b>\n\n"
-        "Статистика нужна для понимания продаж и активности.\n"
-        "Логи нужны для разбора действий пользователя и тестирования."
+        "Статистика нужна для понимания продаж.\n"
+        "Логи — для проверки действий пользователя."
     ),
     "troubleshoot": (
         "🛠 <b>Гайд: если что-то не работает</b>\n\n"
-        "1. Проверь, что бот отвечает на /start\n"
-        "2. Проверь, что у тебя один экземпляр бота\n"
-        "3. Проверь BOT_TOKEN\n"
-        "4. Проверь DATABASE_URL\n"
-        "5. Если зависло действие — жми «⬅️ Назад», «🏠 Меню» или «♻️ Сбросить текущее действие»"
+        "1. Проверь /start\n"
+        "2. Проверь токены\n"
+        "3. Проверь базу\n"
+        "4. Проверь права бота в канале\n"
+        "5. Если действие зависло — жми «⬅️ Назад», «🏠 Меню» или «♻️ Сбросить текущее действие»"
     ),
     "faq": (
         "❓ <b>FAQ для админа/менеджера</b>\n\n"
-        "Q: Почему не приходит оплата?\n"
-        "A: Проверь PAYMENTS_TOKEN.\n\n"
-        "Q: Почему не работает вход в канал?\n"
-        "A: Проверь права бота в канале.\n\n"
-        "Q: Почему не находит @username?\n"
-        "A: Пользователь должен хотя бы один раз написать боту."
+        "Q: Почему не приходит счёт?\nA: Проверь PAYMENTS_TOKEN.\n\n"
+        "Q: Почему не заходит в канал?\nA: Проверь права бота и CHANNEL_ID.\n\n"
+        "Q: Почему не ищет @username?\nA: Пользователь должен хотя бы раз написать боту."
     ),
     "recommended": (
         "⭐ <b>Рекомендуемые настройки</b>\n\n"
         "Быстрый старт:\n"
         "• 1 тариф\n"
         "• кнопки: купить, тарифы, поделиться, поддержка\n"
-        "• воронка: 1 шаг\n\n"
+        "• 1 шаг воронки\n\n"
         "Жёсткая продажа:\n"
         "• оферта до оплаты\n"
         "• 2–3 шага воронки\n"
-        "• промокод активен\n\n"
+        "• активные промокоды\n\n"
         "Мягкая воронка:\n"
         "• без обязательной оферты до оплаты\n"
         "• 1–2 шага воронки\n"
-        "• упор на поддержку и контент"
+        "• упор на поддержку"
     ),
     "one_or_three": (
-        "🧭 <b>Что включить для одного тарифа / трёх тарифов</b>\n\n"
-        "Если у тебя один тариф:\n"
-        "• включи тариф 1\n"
-        "• тарифы 2 и 3 отключи\n"
-        "• можно вообще оставить только кнопку «Купить доступ»\n\n"
-        "Если три тарифа:\n"
-        "• включи кнопку «Тарифы»\n"
-        "• распиши разницу по сроку/цене\n"
-        "• добавь промокоды"
+        "🧭 <b>Один тариф / три тарифа</b>\n\n"
+        "Один тариф:\n"
+        "• включить только тариф 1\n"
+        "• можно оставить кнопку «Купить доступ»\n\n"
+        "Три тарифа:\n"
+        "• включить кнопку «Тарифы»\n"
+        "• показать различия по цене/сроку"
     ),
     "ads_checklist": (
         "📋 <b>Чек-лист перед запуском рекламы</b>\n\n"
         "1. Проверить /start\n"
-        "2. Проверить покупку тестом\n"
-        "3. Проверить выдачу ссылки\n"
-        "4. Проверить стартовое сообщение\n"
-        "5. Проверить кнопки\n"
-        "6. Проверить оферту\n"
-        "7. Проверить воронку\n"
-        "8. Проверить промокод\n"
-        "9. Проверить реферальную ссылку\n"
-        "10. Проверить логи и статистику"
+        "2. Проверить покупку\n"
+        "3. Проверить ссылку в канал\n"
+        "4. Проверить кнопки\n"
+        "5. Проверить оферту\n"
+        "6. Проверить воронку\n"
+        "7. Проверить промокод\n"
+        "8. Проверить рефералку\n"
+        "9. Проверить диагностику\n"
+        "10. Проверить статистику"
     ),
 }
 
@@ -386,6 +367,10 @@ class AdminStates(StatesGroup):
 
     guide_edit_pick_key = State()
     guide_edit_text = State()
+
+    diagnostic_user = State()
+    diagnostic_kick_user = State()
+    diagnostic_invite_user = State()
 
 
 class UserStates(StatesGroup):
@@ -511,10 +496,7 @@ async def init_db():
                 created_at TIMESTAMP NOT NULL DEFAULT NOW()
             );
         """)
-        await conn.execute("""
-            ALTER TABLE IF EXISTS users
-            ALTER COLUMN expire_date DROP NOT NULL;
-        """)
+        await conn.execute("""ALTER TABLE IF EXISTS users ALTER COLUMN expire_date DROP NOT NULL;""")
         await conn.execute("""ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS first_name TEXT;""")
         await conn.execute("""ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS username TEXT;""")
         await conn.execute("""ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS started BOOLEAN NOT NULL DEFAULT FALSE;""")
@@ -880,6 +862,16 @@ async def remove_sub(user_id: int):
         await conn.execute("UPDATE users SET expire_date = NULL WHERE user_id = $1", user_id)
 
 
+async def kick_user_from_channel(user_id: int) -> tuple[bool, str]:
+    try:
+        await bot.ban_chat_member(CHANNEL_ID, user_id)
+        await bot.unban_chat_member(CHANNEL_ID, user_id)
+        return True, "Пользователь исключён из канала."
+    except Exception as e:
+        logger.exception("KICK USER ERROR: %s", e)
+        return False, str(e)
+
+
 async def get_tariffs():
     return sorted(await get_json_setting("tariffs_json", DEFAULT_TARIFFS), key=lambda x: x["id"])
 
@@ -1060,6 +1052,7 @@ def admin_kb():
             [InlineKeyboardButton(text="📨 Рассылки", callback_data="admin_broadcast_menu")],
             [InlineKeyboardButton(text="👮 Админы", callback_data="admin_admins_menu")],
             [InlineKeyboardButton(text="🧾 Логи", callback_data="admin_logs_menu")],
+            [InlineKeyboardButton(text="🩺 Диагностика", callback_data="admin_diagnostics_menu")],
             [InlineKeyboardButton(text="⚙️ Ручное управление", callback_data="admin_manual_menu")],
             [InlineKeyboardButton(text="📚 Гайды", callback_data="admin_guides_menu")],
             [InlineKeyboardButton(text="♻️ Сбросить текущее действие", callback_data="admin_force_reset")],
@@ -1538,6 +1531,9 @@ async def universal_back_btn(message: Message, state: FSMContext):
         AdminStates.custom_node_toggle.state,
         AdminStates.guide_edit_pick_key.state,
         AdminStates.guide_edit_text.state,
+        AdminStates.diagnostic_user.state,
+        AdminStates.diagnostic_kick_user.state,
+        AdminStates.diagnostic_invite_user.state,
     }:
         await state.clear()
         await send_start_screen(message.chat.id, message.from_user.id)
@@ -1921,6 +1917,175 @@ async def admin_force_reset(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer("♻️ Текущее действие сброшено.")
     await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_diagnostics_menu")
+async def admin_diagnostics_menu(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🧪 Общая проверка бота", callback_data="diag_full_check")],
+            [InlineKeyboardButton(text="🔗 Проверить выдачу ссылки", callback_data="diag_invite_check")],
+            [InlineKeyboardButton(text="🚫 Проверить кик из канала", callback_data="diag_kick_check")],
+            [InlineKeyboardButton(text="👤 Диагностика пользователя", callback_data="diag_user_check")],
+        ]
+    )
+
+    await callback.message.answer(
+        "🩺 <b>Диагностика</b>\n\n"
+        "Здесь можно проверить, работает ли бот, база, выдача ссылок и исключение из канала.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "diag_full_check")
+async def diag_full_check(callback: CallbackQuery):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    results = []
+
+    try:
+        me = await bot.get_me()
+        results.append(f"✅ Bot API: <b>@{me.username}</b> ({me.id})")
+    except Exception as e:
+        results.append(f"❌ Bot API: <code>{e}</code>")
+
+    try:
+        async with get_pool().acquire() as conn:
+            db_now = await conn.fetchval("SELECT NOW()")
+        results.append(f"✅ База данных: <b>{db_now}</b>")
+    except Exception as e:
+        results.append(f"❌ База данных: <code>{e}</code>")
+
+    try:
+        chat = await bot.get_chat(CHANNEL_ID)
+        results.append(f"✅ Канал доступен: <b>{chat.title}</b>")
+    except Exception as e:
+        results.append(f"❌ Канал недоступен: <code>{e}</code>")
+
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, callback.from_user.id)
+        results.append(f"✅ Проверка статуса в канале: <b>{member.status}</b>")
+    except Exception as e:
+        results.append(f"⚠️ Проверка статуса в канале: <code>{e}</code>")
+
+    await callback.message.answer(
+        "🧪 <b>Общая диагностика</b>\n\n" + "\n".join(results)
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "diag_invite_check")
+async def diag_invite_check(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.diagnostic_invite_user)
+    await callback.message.answer(
+        "Введи <b>user_id</b> или <b>@username</b> пользователя, которому нужно тестово отправить ссылку.",
+        reply_markup=reply_back_kb(True),
+    )
+    await callback.answer()
+
+
+@dp.message(AdminStates.diagnostic_invite_user)
+async def diagnostic_invite_user_finish(message: Message, state: FSMContext):
+    user_id = await resolve_user_input_to_id(message.text or "")
+    if not user_id:
+        await message.answer("Пользователь не найден.")
+        return
+
+    try:
+        await send_invite_to_user(user_id)
+        await message.answer(f"✅ Тестовая ссылка отправлена пользователю <code>{user_id}</code>.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка отправки ссылки: <code>{e}</code>")
+
+    await state.clear()
+
+
+@dp.callback_query(F.data == "diag_kick_check")
+async def diag_kick_check(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.diagnostic_kick_user)
+    await callback.message.answer(
+        "Введи <b>user_id</b> или <b>@username</b> пользователя, которого нужно тестово исключить из канала.",
+        reply_markup=reply_back_kb(True),
+    )
+    await callback.answer()
+
+
+@dp.message(AdminStates.diagnostic_kick_user)
+async def diagnostic_kick_user_finish(message: Message, state: FSMContext):
+    user_id = await resolve_user_input_to_id(message.text or "")
+    if not user_id:
+        await message.answer("Пользователь не найден.")
+        return
+
+    ok, text = await kick_user_from_channel(user_id)
+    await message.answer(
+        f"{'✅' if ok else '❌'} Проверка кика для <code>{user_id}</code>\n{text}"
+    )
+    await state.clear()
+
+
+@dp.callback_query(F.data == "diag_user_check")
+async def diag_user_check(callback: CallbackQuery, state: FSMContext):
+    if not await is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await state.set_state(AdminStates.diagnostic_user)
+    await callback.message.answer(
+        "Введи <b>user_id</b> или <b>@username</b> пользователя для полной диагностики.",
+        reply_markup=reply_back_kb(True),
+    )
+    await callback.answer()
+
+
+@dp.message(AdminStates.diagnostic_user)
+async def diagnostic_user_finish(message: Message, state: FSMContext):
+    user_id = await resolve_user_input_to_id(message.text or "")
+    if not user_id:
+        await message.answer("Пользователь не найден.")
+        return
+
+    row = await get_user(user_id)
+    if not row:
+        await message.answer("Пользователь не найден в базе.")
+        await state.clear()
+        return
+
+    lines = [
+        "👤 <b>Диагностика пользователя</b>",
+        f"ID: <code>{user_id}</code>",
+        f"Имя: {row['first_name'] or '-'}",
+        f"Username: @{row['username'] or '-'}",
+        f"Нажал начать: <b>{'да' if row['started'] else 'нет'}</b>",
+        f"Покупал: <b>{'да' if row['has_purchased'] else 'нет'}</b>",
+        f"Подписка до: <b>{row['expire_date'].strftime('%d.%m.%Y %H:%M') if row['expire_date'] else '—'}</b>",
+        f"Тариф: <b>{row['active_tariff_id'] or '—'}</b>",
+        f"Напоминание о продлении: <b>{'вкл' if row['pseudo_autorenew_enabled'] else 'выкл'}</b>",
+    ]
+
+    try:
+        member = await bot.get_chat_member(CHANNEL_ID, user_id)
+        lines.append(f"Статус в канале: <b>{member.status}</b>")
+    except Exception as e:
+        lines.append(f"Статус в канале: <code>{e}</code>")
+
+    await message.answer("\n".join(lines))
+    await state.clear()
 
 
 @dp.callback_query(F.data == "admin_stats_menu")
@@ -3451,7 +3616,8 @@ async def admin_admins_menu(callback: CallbackQuery):
     await callback.message.answer(
         "👮 <b>Раздел админов</b>\n\n"
         "Только генеральный админ может выдавать и забирать админку.\n"
-        "Кнопка «Админка» у генерального админа работает всегда.",
+        "Кнопка «Админка» у генерального админа работает всегда.\n\n"
+        "Во всех действиях можно использовать user_id и @username.",
         reply_markup=kb,
     )
     await callback.answer()
@@ -3620,7 +3786,8 @@ async def admin_manual_menu(callback: CallbackQuery):
     )
     await callback.message.answer(
         "⚙️ <b>Ручное управление</b>\n\n"
-        "Здесь можно вручную выдать подписку, снять её или отправить ссылку в канал.",
+        "Здесь можно вручную выдать подписку, снять её или отправить ссылку в канал.\n"
+        "Во всех действиях можно использовать user_id и @username.",
         reply_markup=kb,
     )
     await callback.answer()
@@ -3677,8 +3844,14 @@ async def admin_manual_remove_sub_finish(message: Message, state: FSMContext):
     if not user_id:
         await message.answer("Пользователь не найден.")
         return
+
     await remove_sub(user_id)
-    await message.answer(f"✅ Подписка у <code>{user_id}</code> снята.")
+    kicked, kick_text = await kick_user_from_channel(user_id)
+
+    await message.answer(
+        f"✅ Подписка у <code>{user_id}</code> снята.\n"
+        f"{'✅' if kicked else '⚠️'} Кик из канала: {kick_text}"
+    )
     await state.clear()
 
 
@@ -3825,17 +3998,27 @@ async def check_subs():
     while True:
         try:
             async with get_pool().acquire() as conn:
-                rows = await conn.fetch("SELECT user_id, expire_date FROM users WHERE expire_date IS NOT NULL")
+                rows = await conn.fetch(
+                    """
+                    SELECT user_id, expire_date
+                    FROM users
+                    WHERE expire_date IS NOT NULL
+                    """
+                )
+
             current = now()
             for row in rows:
                 if row["expire_date"] and row["expire_date"] < current:
                     try:
                         await bot.ban_chat_member(CHANNEL_ID, row["user_id"])
                         await bot.unban_chat_member(CHANNEL_ID, row["user_id"])
-                    except Exception:
-                        pass
+                        await log_action(row["user_id"], "auto_kick_expired", "Истекла подписка, выполнен кик из канала")
+                    except Exception as e:
+                        logger.exception("AUTO KICK ERROR: %s", e)
+                        await log_action(row["user_id"], "auto_kick_expired_error", str(e))
         except Exception:
             logger.exception("CHECK_SUBS ERROR")
+
         await asyncio.sleep(60)
 
 
