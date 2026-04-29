@@ -30,9 +30,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
-PAYMENTS_TOKEN = (os.getenv("PAYMENTS_TOKEN") or "").strip()
-DATABASE_URL = (os.getenv("DATABASE_URL") or "").strip()
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "8791147608:AAH6qxr2TH5Uze_TVlgnZkdyqh2EI1xlsKo").strip()
+PAYMENTS_TOKEN = (os.getenv("PAYMENTS_TOKEN") or "390540012:LIVE:93978").strip()
+
+# Локальная PostgreSQL на VPS
+DATABASE_URL = (
+    os.getenv("DATABASE_URL")
+    or "postgresql://armorbot:ArmorDB2026!@127.0.0.1:5432/armorbot"
+).strip()
+
 RENDER_EXTERNAL_URL = (os.getenv("RENDER_EXTERNAL_URL") or "").strip()
 
 CHANNEL_ID = -1003616232121
