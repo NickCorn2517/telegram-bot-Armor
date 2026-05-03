@@ -6,9 +6,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Any
 
 import asyncpg
-from aiohttp import web
+from aiohttp import web, ClientTimeout
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -30,15 +31,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = (os.getenv("BOT_TOKEN") or "8791147608:AAH6qxr2TH5Uze_TVlgnZkdyqh2EI1xlsKo").strip()
-PAYMENTS_TOKEN = (os.getenv("PAYMENTS_TOKEN") or "390540012:LIVE:93978").strip()
-
-# Локальная PostgreSQL на VPS
+BOT_TOKEN = (os.getenv("BOT_TOKEN") or "").strip()
+PAYMENTS_TOKEN = (os.getenv("PAYMENTS_TOKEN") or "").strip()
 DATABASE_URL = (
     os.getenv("DATABASE_URL")
     or "postgresql://armorbot:ArmorDB2026!@127.0.0.1:5432/armorbot"
 ).strip()
-
 RENDER_EXTERNAL_URL = (os.getenv("RENDER_EXTERNAL_URL") or "").strip()
 
 CHANNEL_ID = -1003616232121
@@ -193,8 +191,12 @@ BTN_BACK = "⬅️ Назад"
 BTN_EXIT_YES = "✅ Да, выйти"
 BTN_EXIT_NO = "↩️ Нет, остаться"
 
+telegram_timeout = ClientTimeout(total=15, connect=5, sock_connect=5, sock_read=10)
+session = AiohttpSession(timeout=telegram_timeout)
+
 bot = Bot(
     token=BOT_TOKEN,
+    session=session,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 dp = Dispatcher()
@@ -284,6 +286,13 @@ def format_rub_from_kop(kop: int) -> str:
     return f"{int(rub)}₽" if float(rub).is_integer() else f"{rub:.2f}₽"
 
 
+async def safe_callback_answer(callback: CallbackQuery, text: Optional[str] = None, show_alert: bool = False):
+    try:
+        await callback.answer(text=text, show_alert=show_alert)
+    except Exception as e:
+        logger.exception("CALLBACK ANSWER ERROR: %s", e)
+
+
 def reply_begin_kb():
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=BTN_BEGIN)]],
@@ -359,7 +368,7 @@ async def init_db():
     )
 
     async with db_pool.acquire() as conn:
-        logger.info("NEON OK: %s", await conn.fetchval("SELECT version()"))
+        logger.info("POSTGRES OK: %s", await conn.fetchval("SELECT version()"))
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
@@ -415,22 +424,10 @@ async def init_db():
                 status TEXT NOT NULL DEFAULT 'open'
             );
         """)
-        await conn.execute("""
-            ALTER TABLE IF EXISTS questions
-            ALTER COLUMN text DROP NOT NULL;
-        """)
-        await conn.execute("""
-            ALTER TABLE IF EXISTS questions
-            ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'text';
-        """)
-        await conn.execute("""
-            ALTER TABLE IF EXISTS questions
-            ADD COLUMN IF NOT EXISTS file_id TEXT;
-        """)
-        await conn.execute("""
-            ALTER TABLE IF EXISTS questions
-            ADD COLUMN IF NOT EXISTS caption TEXT;
-        """)
+        await conn.execute("""ALTER TABLE IF EXISTS questions ALTER COLUMN text DROP NOT NULL;""")
+        await conn.execute("""ALTER TABLE IF EXISTS questions ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'text';""")
+        await conn.execute("""ALTER TABLE IF EXISTS questions ADD COLUMN IF NOT EXISTS file_id TEXT;""")
+        await conn.execute("""ALTER TABLE IF EXISTS questions ADD COLUMN IF NOT EXISTS caption TEXT;""")
 
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS promo_codes (
@@ -1402,15 +1399,19 @@ async def send_invoice_for_tariff(user_id: int, tariff_id: int, pseudo_autorenew
 
 
 async def send_invite_to_user(user_id: int):
-    link = await bot.create_chat_invite_link(
-        chat_id=CHANNEL_ID,
-        member_limit=1,
-        expire_date=now() + timedelta(minutes=15),
-    )
-    await bot.send_message(
-        user_id,
-        f"🔗 Ссылка для входа в канал:\n{link.invite_link}\n\nСсылка действует 15 минут.",
-    )
+    try:
+        link = await bot.create_chat_invite_link(
+            chat_id=CHANNEL_ID,
+            member_limit=1,
+            expire_date=now() + timedelta(minutes=15),
+        )
+        await bot.send_message(
+            user_id,
+            f"🔗 Ссылка для входа в канал:\n{link.invite_link}\n\nСсылка действует 15 минут.",
+        )
+    except Exception as e:
+        logger.exception("SEND INVITE ERROR user_id=%s error=%s", user_id, e)
+        raise
 
 
 async def ask_exit_confirmation(message: Message, state: FSMContext, destination: str):
@@ -1563,101 +1564,100 @@ async def universal_back_btn(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "open_admin_panel")
 async def open_admin_panel(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
     await callback.message.answer("⚙️ <b>Админка</b>", reply_markup=admin_kb())
     await bot.send_message(callback.from_user.id, "Нижнее меню обновлено.", reply_markup=reply_menu_kb(True))
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "go_main")
 async def go_main(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await send_start_screen(callback.from_user.id, callback.from_user.id)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "show_tariffs")
 async def show_tariffs(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     tariffs = await get_tariffs()
     await callback.message.answer("📦 <b>Доступные тарифы</b>", reply_markup=tariffs_kb(tariffs))
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "buy_entry")
 async def buy_entry(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     offer = await get_offer()
     if offer.get("enabled_before_pay"):
         await log_action(callback.from_user.id, "offer_open", "before_pay")
         if offer.get("require_accept_before_pay"):
             await send_offer(callback.from_user.id, with_agree_button=True)
-            await callback.answer()
             return
         await send_offer(callback.from_user.id)
 
     tariffs = await get_tariffs()
     await callback.message.answer("Выбери тариф:", reply_markup=tariffs_kb(tariffs))
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "offer_accept_and_pay")
 async def offer_accept_and_pay(callback: CallbackQuery):
+    await safe_callback_answer(callback, "Подтверждено")
     async with get_pool().acquire() as conn:
         await conn.execute("UPDATE users SET accepted_offer_at = NOW() WHERE user_id = $1", callback.from_user.id)
     tariffs = await get_tariffs()
     await callback.message.answer("✅ Оферта подтверждена.\nТеперь выбери тариф:", reply_markup=tariffs_kb(tariffs))
-    await callback.answer("Подтверждено")
 
 
 @dp.callback_query(F.data == "show_offer")
 async def show_offer_cb(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await send_offer(callback.from_user.id, with_agree_button=False)
     await log_action(callback.from_user.id, "offer_open", "manual")
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "show_share")
 async def show_share_cb(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await send_share_message(callback.from_user.id, callback.from_user.id)
     await log_action(callback.from_user.id, "share_open")
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "enter_promo_inline")
 async def enter_promo_inline(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(UserStates.enter_promo)
     is_admin_user = await is_admin(callback.from_user.id)
     await callback.message.answer(
         "Введи промокод одним сообщением.\nЧтобы выйти, нажми «⬅️ Назад» или «🏠 Меню».",
         reply_markup=reply_back_kb(is_admin_user),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "support_open")
 async def support_open(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(UserStates.support_message)
     is_admin_user = await is_admin(callback.from_user.id)
     await callback.message.answer(
         "Отправь сообщение в поддержку: текст, фото, видео, голосовое, кружок, файл, аудио или GIF.\n\nНажми «⬅️ Назад» для выхода.",
         reply_markup=reply_back_kb(is_admin_user),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "ask_content")
 async def ask_content(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(UserStates.question_content)
     is_admin_user = await is_admin(callback.from_user.id)
     await callback.message.answer(
         "Отправь вопрос по контенту: текст, фото, видео, голосовое, кружок, файл, аудио или GIF.\n\nНажми «⬅️ Назад» для выхода.",
         reply_markup=reply_back_kb(is_admin_user),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "ask_homework")
 async def ask_homework(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await send_homework_intro(callback.from_user.id)
     await state.set_state(UserStates.homework_message)
     is_admin_user = await is_admin(callback.from_user.id)
@@ -1666,7 +1666,6 @@ async def ask_homework(callback: CallbackQuery, state: FSMContext):
         "Теперь отправь домашнее задание.\nНажми «⬅️ Назад» для выхода.",
         reply_markup=reply_back_kb(is_admin_user),
     )
-    await callback.answer()
 
 
 async def process_user_message_to_admin(message: Message, state: FSMContext, q_type: str, title: str):
@@ -1821,6 +1820,7 @@ async def apply_promo(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "my_sub")
 async def my_sub(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     row = await get_user(callback.from_user.id)
     active = await has_active_sub(callback.from_user.id)
     reminder_enabled = bool(row and row["pseudo_autorenew_enabled"])
@@ -1835,11 +1835,11 @@ async def my_sub(callback: CallbackQuery):
         f"Напоминание о продлении: <b>{'включено' if reminder_enabled else 'выключено'}</b>",
         reply_markup=my_sub_kb(active, reminder_enabled),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "toggle_pseudo")
 async def toggle_pseudo(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     async with get_pool().acquire() as conn:
         current = await conn.fetchval("SELECT pseudo_autorenew_enabled FROM users WHERE user_id = $1", callback.from_user.id)
         new_val = not bool(current)
@@ -1847,25 +1847,24 @@ async def toggle_pseudo(callback: CallbackQuery):
     await callback.message.answer(
         "✅ Напоминание о продлении включено." if new_val else "✅ Напоминание о продлении отключено."
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "sub_enter_channel")
 async def sub_enter_channel(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     if not await has_active_sub(callback.from_user.id):
         await callback.message.answer("Нет активной подписки.")
-        await callback.answer()
         return
     await send_invite_to_user(callback.from_user.id)
-    await callback.answer("Ссылка отправлена")
+    await callback.message.answer("✅ Ссылка отправлена в личные сообщения.")
 
 
 @dp.callback_query(F.data.startswith("tariff:"))
 async def tariff_view(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     tariff_id = int(callback.data.split(":")[1])
     tariff = await get_tariff_by_id(tariff_id)
     if not tariff:
-        await callback.answer("Тариф не найден", show_alert=True)
         return
     pseudo_text = {
         "off": "Без напоминания о продлении",
@@ -1880,19 +1879,21 @@ async def tariff_view(callback: CallbackQuery):
         f"Напоминание о продлении: <b>{pseudo_text}</b>",
         reply_markup=tariff_buy_kb(tariff),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("pay:"))
 async def pay_tariff(callback: CallbackQuery):
+    await safe_callback_answer(callback, "Счёт отправлен")
     _, tariff_id, pseudo = callback.data.split(":")
     await send_invoice_for_tariff(callback.from_user.id, int(tariff_id), pseudo == "1")
-    await callback.answer("Счёт отправлен")
 
 
 @dp.pre_checkout_query()
 async def pre_checkout(q: PreCheckoutQuery):
-    await q.answer(ok=True)
+    try:
+        await q.answer(ok=True)
+    except Exception as e:
+        logger.exception("PRECHECKOUT ERROR: %s", e)
 
 
 @dp.message(F.successful_payment)
@@ -1966,10 +1967,10 @@ async def success_payment(message: Message):
 
 @dp.callback_query(F.data.startswith("cnode:"))
 async def user_custom_node(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     node_id = int(callback.data.split(":")[1])
     node = await get_custom_node(node_id)
     if not node or not node["enabled"]:
-        await callback.answer("Кнопка недоступна", show_alert=True)
         return
 
     children = await get_custom_nodes(node_id)
@@ -1990,7 +1991,6 @@ async def user_custom_node(callback: CallbackQuery):
         payload,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=child_rows),
     )
-    await callback.answer()
 
 
 @dp.message(Command("admin"))
@@ -2076,18 +2076,17 @@ async def paytest(message: Message):
 
 @dp.callback_query(F.data == "admin_force_reset")
 async def admin_force_reset(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
     await state.clear()
     await callback.message.answer("♻️ Текущее действие сброшено.")
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_diagnostics_menu")
 async def admin_diagnostics_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
 
     kb = InlineKeyboardMarkup(
@@ -2101,16 +2100,15 @@ async def admin_diagnostics_menu(callback: CallbackQuery):
 
     await callback.message.answer(
         "🩺 <b>Диагностика</b>\n\n"
-        "Здесь можно проверить, работает ли бот, база, выдача ссылок и исключение из канала.",
+        "Здесь можно быстро проверить, работает ли бот, база, ссылка в канал и исключение из канала.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "diag_full_check")
 async def diag_full_check(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
 
     results = []
@@ -2143,13 +2141,12 @@ async def diag_full_check(callback: CallbackQuery):
     await callback.message.answer(
         "🧪 <b>Общая диагностика</b>\n\n" + "\n".join(results)
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "diag_invite_check")
 async def diag_invite_check(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
 
     await state.set_state(AdminStates.diagnostic_invite_user)
@@ -2157,7 +2154,6 @@ async def diag_invite_check(callback: CallbackQuery, state: FSMContext):
         "Введи <b>user_id</b> или <b>@username</b> пользователя, которому нужно тестово отправить ссылку.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.diagnostic_invite_user)
@@ -2178,8 +2174,8 @@ async def diagnostic_invite_user_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "diag_kick_check")
 async def diag_kick_check(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
 
     await state.set_state(AdminStates.diagnostic_kick_user)
@@ -2187,7 +2183,6 @@ async def diag_kick_check(callback: CallbackQuery, state: FSMContext):
         "Введи <b>user_id</b> или <b>@username</b> пользователя, которого нужно тестово исключить из канала.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.diagnostic_kick_user)
@@ -2206,8 +2201,8 @@ async def diagnostic_kick_user_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "diag_user_check")
 async def diag_user_check(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
 
     await state.set_state(AdminStates.diagnostic_user)
@@ -2215,7 +2210,6 @@ async def diag_user_check(callback: CallbackQuery, state: FSMContext):
         "Введи <b>user_id</b> или <b>@username</b> пользователя для полной диагностики.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.diagnostic_user)
@@ -2255,6 +2249,7 @@ async def diagnostic_user_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_stats_menu")
 async def admin_stats_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Общая статистика", callback_data="admin_stats_overall")],
@@ -2265,14 +2260,14 @@ async def admin_stats_menu(callback: CallbackQuery):
     )
     await callback.message.answer(
         "📊 <b>Раздел статистики</b>\n\n"
-        "Здесь можно посмотреть общие показатели, разбивку по тарифам, промокодам и рефералам.",
+        "Здесь можно посмотреть общие показатели, продажи по тарифам, статистику промокодов и рефералов.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_stats_overall")
 async def admin_stats_overall(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     s = await get_stats()
     tariffs = {t["id"]: t["name"] for t in await get_tariffs()}
     tariff_lines = []
@@ -2293,11 +2288,11 @@ async def admin_stats_overall(callback: CallbackQuery):
         "Покупки по тарифам:\n"
         + ("\n".join(tariff_lines) if tariff_lines else "—")
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_stats_tariffs")
 async def admin_stats_tariffs(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             """
@@ -2318,11 +2313,11 @@ async def admin_stats_tariffs(callback: CallbackQuery):
             name = t["name"] if t else f"ID {row['last_paid_tariff_id']}"
             text += f"{name}: <b>{row['cnt']}</b>\n"
     await callback.message.answer(text)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_stats_promos")
 async def admin_stats_promos(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             """
@@ -2348,11 +2343,11 @@ async def admin_stats_promos(callback: CallbackQuery):
                 f"До: {exp}\n\n"
             )
     await callback.message.answer(text[:4000])
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_stats_referrals")
 async def admin_stats_referrals(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     async with get_pool().acquire() as conn:
         total_refs = await conn.fetchval("SELECT COUNT(*) FROM referrals")
         rewarded = await conn.fetchval("SELECT COUNT(*) FROM users WHERE referral_rewarded = TRUE")
@@ -2377,11 +2372,11 @@ async def admin_stats_referrals(callback: CallbackQuery):
         for row in tops:
             text += f"<code>{row['referrer_id']}</code> — <b>{row['cnt']}</b>\n"
     await callback.message.answer(text)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_users_menu")
 async def admin_users_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👤 Найти пользователя", callback_data="admin_find_user")],
@@ -2393,11 +2388,11 @@ async def admin_users_menu(callback: CallbackQuery):
         "Здесь можно найти пользователя по ID или @username, а также посмотреть список последних пользователей.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_find_user")
 async def admin_find_user(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.find_user)
     await callback.message.answer(
         "Введи <b>user_id</b> или <b>@username</b> пользователя.\n\n"
@@ -2406,7 +2401,6 @@ async def admin_find_user(callback: CallbackQuery, state: FSMContext):
         "<code>@nickname</code>",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.find_user)
@@ -2442,6 +2436,7 @@ async def admin_find_user_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_users_list")
 async def admin_users_list(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             """
@@ -2467,11 +2462,11 @@ async def admin_users_list(callback: CallbackQuery):
                 f"напоминание {'on' if row['pseudo_autorenew_enabled'] else 'off'}\n"
             )
     await callback.message.answer(text[:4000])
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_questions_menu")
 async def admin_questions_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="❓ Вопросы по контенту", callback_data="admin_q_content")],
@@ -2484,14 +2479,12 @@ async def admin_questions_menu(callback: CallbackQuery):
         "Выбери раздел, чтобы посмотреть неотвеченные сообщения пользователей.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 async def show_questions(callback: CallbackQuery, q_type: str, title: str):
     rows = await get_open_questions_by_type(q_type)
     if not rows:
         await callback.message.answer(f"Открытых элементов в разделе «{title}» нет.")
-        await callback.answer()
         return
 
     for row in rows[:10]:
@@ -2515,26 +2508,29 @@ async def show_questions(callback: CallbackQuery, q_type: str, title: str):
             prefix=prefix,
             reply_markup=admin_question_reply_kb(row["id"], row["user_id"], row["type"]),
         )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_q_content")
 async def admin_q_content(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await show_questions(callback, "content", "❓ <b>Вопрос по контенту</b>")
 
 
 @dp.callback_query(F.data == "admin_q_support")
 async def admin_q_support(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await show_questions(callback, "support", "🛠 <b>Обращение в поддержку</b>")
 
 
 @dp.callback_query(F.data == "admin_q_homework")
 async def admin_q_homework(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await show_questions(callback, "homework", "📝 <b>Домашнее задание</b>")
 
 
 @dp.callback_query(F.data == "admin_answers_menu")
 async def admin_answers_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="💬 Ответить по user_id / @username", callback_data="admin_answer_by_id")],
@@ -2546,22 +2542,22 @@ async def admin_answers_menu(callback: CallbackQuery):
         "Можно ответить прямо из очереди вопросов кнопкой «Ответить» или вручную по user_id / @username.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_answer_by_id")
 async def admin_answer_by_id(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.answer_pick_user)
     await callback.message.answer(
         "Введи <b>user_id</b> или <b>@username</b> пользователя.\n\n"
         "Потом бот попросит отправить ответ.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("replyq:"))
 async def replyq_callback(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     _, qid, user_id, q_type = callback.data.split(":")
     await state.update_data(answer_user_id=int(user_id), answer_question_id=int(qid), answer_q_type=q_type)
     await state.set_state(AdminStates.answer_message)
@@ -2570,7 +2566,6 @@ async def replyq_callback(callback: CallbackQuery, state: FSMContext):
         "Отправь текст, фото, видео, голосовое, кружок, файл, аудио или GIF.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.answer_pick_user)
@@ -2603,11 +2598,12 @@ async def admin_answer_message_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_tariffs")
 async def admin_tariffs(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     tariffs = await get_tariffs()
     txt = "💳 <b>Тарифы</b>\n\n"
     txt += "Формат настройки:\n"
     txt += "<code>Название | цена_в_рублях | дни | active(1/0) | pseudo(off/choice/default_on)</code>\n\n"
-    txt += "Пояснения:\n"
+    txt += "Как это работает:\n"
     txt += "active: 1 = тариф виден пользователю, 0 = скрыт\n"
     txt += "pseudo:\n"
     txt += "off = без напоминания\n"
@@ -2631,11 +2627,11 @@ async def admin_tariffs(callback: CallbackQuery):
         ]
     )
     await callback.message.answer(txt[:4000], reply_markup=kb)
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("edit_tariff:"))
 async def edit_tariff_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     tariff_id = int(callback.data.split(":")[1])
     await state.update_data(tariff_id=tariff_id)
     await state.set_state(AdminStates.edit_tariff_data)
@@ -2646,7 +2642,6 @@ async def edit_tariff_start(callback: CallbackQuery, state: FSMContext):
         "<code>Стандарт | 15000 | 365 | 1 | choice</code>",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.edit_tariff_data)
@@ -2696,6 +2691,7 @@ async def edit_tariff_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_offer_menu")
 async def admin_offer_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     offer = await get_offer()
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -2709,23 +2705,23 @@ async def admin_offer_menu(callback: CallbackQuery):
     )
     await callback.message.answer(
         "🛡 <b>Настройка оферты</b>\n\n"
-        "Пояснения:\n"
-        "До оплаты — показывать оферту перед выбором тарифа.\n"
-        "После оплаты — отправлять оферту после успешной оплаты.\n"
-        "Требовать согласие — без подтверждения пользователь не сможет перейти к оплате.\n",
+        "Здесь ты настраиваешь текст оферты и момент, когда бот её показывает.\n\n"
+        "До оплаты — бот покажет оферту перед выбором тарифа.\n"
+        "После оплаты — бот отправит оферту уже после успешной оплаты.\n"
+        "Требовать согласие — пользователь не сможет перейти к оплате, пока не подтвердит оферту.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "offer_preview")
 async def offer_preview(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await send_offer(callback.from_user.id, with_agree_button=False)
-    await callback.answer()
 
 
 @dp.callback_query(F.data.in_(["offer_toggle_before", "offer_toggle_after", "offer_toggle_accept"]))
 async def offer_toggle(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     offer = await get_offer()
     if callback.data == "offer_toggle_before":
         offer["enabled_before_pay"] = not offer["enabled_before_pay"]
@@ -2735,14 +2731,13 @@ async def offer_toggle(callback: CallbackQuery):
         offer["require_accept_before_pay"] = not offer["require_accept_before_pay"]
     await set_json_setting("offer_json", offer)
     await callback.message.answer("✅ Настройка оферты обновлена.")
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "offer_set_text")
 async def offer_set_text(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_offer_text)
     await callback.message.answer("Отправь новый текст оферты.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_offer_text)
@@ -2756,9 +2751,9 @@ async def offer_set_text_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "offer_set_media")
 async def offer_set_media(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_offer_media)
     await callback.message.answer("Отправь фото/видео или <code>remove</code>.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_offer_media)
@@ -2783,6 +2778,7 @@ async def offer_set_media_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_funnel_menu")
 async def admin_funnel_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     funnel = await get_funnel()
     rows = [
         [InlineKeyboardButton(text=f"Воронка: {'ВКЛ' if funnel['enabled'] else 'ВЫКЛ'}", callback_data="funnel_toggle")],
@@ -2793,33 +2789,35 @@ async def admin_funnel_menu(callback: CallbackQuery):
     ]
     await callback.message.answer(
         "🪄 <b>Настройка воронки</b>\n\n"
-        "Пояснения:\n"
-        "Воронка — серия автоматических сообщений тем, кто зашёл, но не купил.\n"
-        "Время отправки — в какое время дня бот может отправлять шаги.\n"
-        "У каждого шага есть включение, задержка в часах, текст и медиа.\n",
+        "Воронка — это автоматические сообщения тем, кто зашёл в бота, но ещё не купил.\n\n"
+        "У каждого шага есть:\n"
+        "— включение или выключение\n"
+        "— задержка в часах\n"
+        "— текст\n"
+        "— фото или видео\n\n"
+        "Время отправки — это время суток, раньше которого бот не будет отправлять шаг.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "funnel_toggle")
 async def funnel_toggle(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     funnel = await get_funnel()
     funnel["enabled"] = not funnel["enabled"]
     await set_json_setting("funnel_json", funnel)
     await callback.message.answer("✅ Воронка обновлена.")
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "funnel_set_time")
 async def funnel_set_time(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_funnel_time)
     await callback.message.answer(
         "Введи время отправки в формате <code>20:00</code>.\n"
         "Пример: все шаги будут отправляться не раньше этого времени.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_funnel_time)
@@ -2840,6 +2838,7 @@ async def funnel_set_time_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("funnel_step:"))
 async def funnel_step(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     idx = int(callback.data.split(":")[1]) - 1
     funnel = await get_funnel()
     step = funnel["steps"][idx]
@@ -2854,8 +2853,7 @@ async def funnel_step(callback: CallbackQuery):
     )
     await callback.message.answer(
         f"Шаг {idx+1}\n\n"
-        "Пояснения:\n"
-        "Задержка — через сколько часов после начала знакомства пользователя с ботом можно отправлять это сообщение.\n"
+        "Задержка — через сколько часов после знакомства с ботом можно отправить это сообщение.\n"
         "Текст — основное сообщение шага.\n"
         "Фото/видео — медиа шага.\n\n"
         f"Включён: <b>{step['enabled']}</b>\n"
@@ -2863,11 +2861,11 @@ async def funnel_step(callback: CallbackQuery):
         f"Текст: {step['text']}",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("funnel_step_preview:"))
 async def funnel_step_preview(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     idx = int(callback.data.split(":")[1]) - 1
     funnel = await get_funnel()
     step = funnel["steps"][idx]
@@ -2878,21 +2876,21 @@ async def funnel_step_preview(callback: CallbackQuery):
         "caption": step.get("text"),
     }
     await send_payload(callback.from_user.id, payload)
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("funnel_step_toggle:"))
 async def funnel_step_toggle(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     idx = int(callback.data.split(":")[1]) - 1
     funnel = await get_funnel()
     funnel["steps"][idx]["enabled"] = not funnel["steps"][idx]["enabled"]
     await set_json_setting("funnel_json", funnel)
     await callback.message.answer("✅ Шаг обновлён.")
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("funnel_step_delay:"))
 async def funnel_step_delay_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     idx = int(callback.data.split(":")[1]) - 1
     await state.update_data(funnel_step_idx=idx)
     await state.set_state(AdminStates.set_funnel_step_delay)
@@ -2901,7 +2899,6 @@ async def funnel_step_delay_start(callback: CallbackQuery, state: FSMContext):
         "Например: <code>12</code> — отправить шаг примерно через 12 часов.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_funnel_step_delay)
@@ -2922,11 +2919,11 @@ async def funnel_step_delay_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("funnel_step_text:"))
 async def funnel_step_text_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     idx = int(callback.data.split(":")[1]) - 1
     await state.update_data(funnel_step_idx=idx)
     await state.set_state(AdminStates.set_funnel_step_text)
     await callback.message.answer("Отправь новый текст шага.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_funnel_step_text)
@@ -2942,11 +2939,11 @@ async def funnel_step_text_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("funnel_step_media:"))
 async def funnel_step_media_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     idx = int(callback.data.split(":")[1]) - 1
     await state.update_data(funnel_step_idx=idx)
     await state.set_state(AdminStates.set_funnel_step_media)
     await callback.message.answer("Отправь фото/видео или <code>remove</code>.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_funnel_step_media)
@@ -2973,6 +2970,7 @@ async def funnel_step_media_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_content_menu")
 async def admin_content_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🧠 Стартовый текст", callback_data="admin_start_text")],
@@ -2983,14 +2981,14 @@ async def admin_content_menu(callback: CallbackQuery):
     )
     await callback.message.answer(
         "📣 <b>Контент бота</b>\n\n"
-        "Здесь настраиваются тексты и медиа основных пользовательских сообщений.",
+        "Здесь меняются тексты и медиа основных сообщений, которые видит пользователь.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_start_text")
 async def admin_start_text(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_start_text)
     current = await get_setting("start_text") or DEFAULT_START_TEXT
     await callback.message.answer(
@@ -2998,7 +2996,6 @@ async def admin_start_text(callback: CallbackQuery, state: FSMContext):
         "Отправь новый текст стартового сообщения.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_start_text)
@@ -3010,13 +3007,13 @@ async def admin_start_text_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_start_media")
 async def admin_start_media(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_start_media)
     await callback.message.answer(
         "Отправь фото/видео для стартового сообщения.\n"
         "Или отправь <code>remove</code>, чтобы убрать медиа.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_start_media)
@@ -3044,11 +3041,11 @@ async def admin_start_media_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_share")
 async def admin_share(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     share = await get_share()
     await callback.message.answer(
         f"📣 <b>Настройка блока «Поделиться»</b>\n\n"
         f"Текущий текст:\n{share['text']}\n\n"
-        "Пояснение:\n"
         "Этот блок показывает пользователю его реферальную ссылку и дополнительный текст приглашения.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -3058,20 +3055,19 @@ async def admin_share(callback: CallbackQuery):
             ]
         ),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "share_preview")
 async def share_preview(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await send_share_message(callback.from_user.id, callback.from_user.id)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "share_set_text")
 async def share_set_text(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_share_text)
     await callback.message.answer("Отправь новый текст блока «Поделиться».", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_share_text)
@@ -3085,9 +3081,9 @@ async def share_set_text_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "share_set_media")
 async def share_set_media(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_share_media)
     await callback.message.answer("Отправь фото/видео или <code>remove</code>.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_share_media)
@@ -3112,11 +3108,11 @@ async def share_set_media_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_homework")
 async def admin_homework(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     hw = await get_homework()
     await callback.message.answer(
         f"📝 <b>Настройка домашнего задания</b>\n\n"
         f"Текущий текст:\n{hw['text']}\n\n"
-        "Пояснение:\n"
         "Это вводное сообщение, которое показывается пользователю перед отправкой домашнего задания.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -3126,20 +3122,19 @@ async def admin_homework(callback: CallbackQuery):
             ]
         ),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "hw_preview")
 async def hw_preview(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await send_homework_intro(callback.from_user.id)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "hw_set_text")
 async def hw_set_text(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_homework_text)
     await callback.message.answer("Отправь новый текст блока домашнего задания.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_homework_text)
@@ -3153,9 +3148,9 @@ async def hw_set_text_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "hw_set_media")
 async def hw_set_media(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.set_homework_media)
     await callback.message.answer("Отправь фото/видео или <code>remove</code>.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_homework_media)
@@ -3180,6 +3175,7 @@ async def hw_set_media_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_start_buttons")
 async def admin_start_buttons(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     data = await get_start_buttons()
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -3195,26 +3191,28 @@ async def admin_start_buttons(callback: CallbackQuery):
     )
     await callback.message.answer(
         "🔘 <b>Настройка кнопок стартового сообщения</b>\n\n"
-        "Здесь можно по отдельности включать и выключать кнопки, которые видит пользователь в стартовом сообщении.\n\n"
-        "Кнопка «Админка» здесь не настраивается: у генерального админа она работает всегда.",
+        "Здесь ты выбираешь, какие кнопки будет видеть пользователь после входа в бота.\n\n"
+        "Если кнопка включена — пользователь её видит.\n"
+        "Если кнопка выключена — она скрыта.\n\n"
+        "Кнопка «Админка» не отключается: главный админ видит её всегда.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("toggle_start_btn:"))
 async def toggle_start_btn(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     key = callback.data.split(":")[1]
     data = await get_start_buttons()
     if key in data:
         data[key] = not data[key]
         await set_json_setting("start_buttons_json", data)
         await callback.message.answer("✅ Настройка кнопки обновлена.")
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_custom_menu")
 async def admin_custom_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     rows = await get_custom_nodes(None)
     text = "🧩 <b>Пользовательские кнопки и подменю</b>\n\n"
     text += "Здесь можно создавать свои кнопки, подменю и сообщения.\n"
@@ -3244,11 +3242,11 @@ async def admin_custom_menu(callback: CallbackQuery):
         ]
     )
     await callback.message.answer(text, reply_markup=kb)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "custom_create")
 async def custom_create(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     node_id = await next_custom_node_id()
     async with get_pool().acquire() as conn:
         await conn.execute(
@@ -3265,11 +3263,11 @@ async def custom_create(callback: CallbackQuery):
         f"✅ Создана кнопка с ID <b>{node_id}</b>.\n"
         "Теперь настрой её название, сообщение и при необходимости родителя."
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "custom_list_all")
 async def custom_list_all(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             """
@@ -3289,11 +3287,11 @@ async def custom_list_all(callback: CallbackQuery):
                 f"sort={r['sort_order']} | {r['title']}\n"
             )
     await callback.message.answer(text[:4000])
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "custom_set_title")
 async def custom_set_title_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.custom_node_title)
     await callback.message.answer(
         "Отправь строку:\n"
@@ -3302,7 +3300,6 @@ async def custom_set_title_start(callback: CallbackQuery, state: FSMContext):
         "<code>2 | Отзывы</code>",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.custom_node_title)
@@ -3321,13 +3318,13 @@ async def custom_set_title_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "custom_set_text")
 async def custom_set_text_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.custom_node_text)
     await callback.message.answer(
         "Отправь строку:\n"
         "<code>ID_кнопки | Новый текст сообщения</code>",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.custom_node_text)
@@ -3346,6 +3343,7 @@ async def custom_set_text_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "custom_set_media")
 async def custom_set_media_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.custom_node_media)
     await callback.message.answer(
         "Сначала отправь строку с ID:\n"
@@ -3354,7 +3352,6 @@ async def custom_set_media_start(callback: CallbackQuery, state: FSMContext):
         "Чтобы убрать медиа: <code>ID_кнопки | remove</code>",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.custom_node_media, F.text)
@@ -3421,6 +3418,7 @@ async def custom_set_media_video(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "custom_set_parent")
 async def custom_set_parent_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.custom_node_parent)
     await callback.message.answer(
         "Отправь строку:\n"
@@ -3429,7 +3427,6 @@ async def custom_set_parent_start(callback: CallbackQuery, state: FSMContext):
         "<code>ID_кнопки | 0</code>",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.custom_node_parent)
@@ -3456,6 +3453,7 @@ async def custom_set_parent_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "custom_set_sort")
 async def custom_set_sort_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.custom_node_sort)
     await callback.message.answer(
         "Отправь строку:\n"
@@ -3463,7 +3461,6 @@ async def custom_set_sort_start(callback: CallbackQuery, state: FSMContext):
         "Чем меньше число, тем выше кнопка будет в списке.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.custom_node_sort)
@@ -3483,13 +3480,13 @@ async def custom_set_sort_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "custom_toggle")
 async def custom_toggle_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.custom_node_toggle)
     await callback.message.answer(
         "Отправь ID кнопки, которую нужно включить или выключить.\n"
         "Бот сам переключит её состояние.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.custom_node_toggle)
@@ -3511,13 +3508,14 @@ async def custom_toggle_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_promo_menu")
 async def admin_promo_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     await callback.message.answer(
         "🎁 <b>Промокоды</b>\n\n"
         "Создание:\n"
         "<code>CODE | percent | значение | tariff_id(или 0) | max_uses(или 0) | days_valid</code>\n"
         "или\n"
         "<code>CODE | amount | значение_в_рублях | tariff_id(или 0) | max_uses(или 0) | days_valid</code>\n\n"
-        "Пояснения:\n"
+        "Как это работает:\n"
         "percent — скидка в процентах\n"
         "amount — фиксированная скидка в рублях\n"
         "tariff_id = 0 — промокод для всех тарифов\n"
@@ -3531,14 +3529,13 @@ async def admin_promo_menu(callback: CallbackQuery):
             ]
         ),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "promo_create")
 async def promo_create_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.promo_create)
     await callback.message.answer("Отправь строку создания промокода.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.promo_create)
@@ -3584,9 +3581,9 @@ async def promo_create_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "promo_delete")
 async def promo_delete_start(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.promo_delete)
     await callback.message.answer("Введи код промокода для деактивации.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.promo_delete)
@@ -3600,6 +3597,7 @@ async def promo_delete_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_referral_menu")
 async def admin_referral_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     s = await get_referral_settings()
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -3612,25 +3610,22 @@ async def admin_referral_menu(callback: CallbackQuery):
         f"Включена: <b>{s['enabled']}</b>\n"
         f"Бонусных дней: <b>{s['reward_days']}</b>\n"
         f"Текст: {s['text']}\n\n"
-        "Пояснение:\n"
         "После первой оплаты приглашённого пользователя пригласившему начисляются бонусные дни.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "refcfg_edit")
 async def refcfg_edit(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.refcfg)
     await callback.message.answer(
         "Отправь строку:\n"
         "<code>1 | 30 | Новый текст рефералки</code>\n\n"
-        "Пояснения:\n"
         "1/0 — включить или выключить реферальную систему\n"
         "30 — сколько дней начислять за успешное приглашение",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.refcfg)
@@ -3650,6 +3645,7 @@ async def refcfg_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_reminders")
 async def admin_reminders(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     rem = await get_reminders()
     await callback.message.answer(
         "🔔 <b>Напоминания о продлении</b>\n\n"
@@ -3659,13 +3655,11 @@ async def admin_reminders(callback: CallbackQuery, state: FSMContext):
         f"Третье за: <b>{rem['hours_before_3']}</b> ч\n\n"
         "Отправь строку:\n"
         "<code>1 | 72 | 24 | 1</code>\n\n"
-        "Пояснения:\n"
         "1/0 — включить или выключить все напоминания\n"
         "72 | 24 | 1 — за сколько часов до конца подписки отправлять 3 напоминания",
         reply_markup=reply_back_kb(True),
     )
     await state.set_state(AdminStates.set_reminders)
-    await callback.answer()
 
 
 @dp.message(AdminStates.set_reminders)
@@ -3688,6 +3682,7 @@ async def admin_reminders_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_broadcast_menu")
 async def admin_broadcast_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📨 Рассылка текстом", callback_data="admin_broadcast_text")],
@@ -3699,14 +3694,13 @@ async def admin_broadcast_menu(callback: CallbackQuery):
         "Можно отправить массовое сообщение всем пользователям из базы.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_broadcast_text")
 async def admin_broadcast_text(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.broadcast_text)
     await callback.message.answer("Отправь текст рассылки.", reply_markup=reply_back_kb(True))
-    await callback.answer()
 
 
 @dp.message(AdminStates.broadcast_text)
@@ -3728,12 +3722,12 @@ async def admin_broadcast_text_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_broadcast_media")
 async def admin_broadcast_media(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.broadcast_media_caption)
     await callback.message.answer(
         "Сначала отправь подпись, либо <code>-</code> без подписи.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.broadcast_media_caption)
@@ -3771,6 +3765,7 @@ async def admin_broadcast_media_file_finish(message: Message, state: FSMContext)
 
 @dp.callback_query(F.data == "admin_admins_menu")
 async def admin_admins_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👮 Список админов", callback_data="admin_admins_list")],
@@ -3785,11 +3780,11 @@ async def admin_admins_menu(callback: CallbackQuery):
         "Во всех действиях можно использовать user_id и @username.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_admins_list")
 async def admin_admins_list(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     rows = await list_admins()
     text = f"👮 <b>Админы</b>\n\nГлавный админ: <code>{ADMIN_ID}</code>\n\n"
     if rows:
@@ -3802,20 +3797,18 @@ async def admin_admins_list(callback: CallbackQuery):
     else:
         text += "Дополнительных админов нет."
     await callback.message.answer(text)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_admins_add")
 async def admin_admins_add(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     if not await is_general_admin(callback.from_user.id):
-        await callback.answer("Только главный админ", show_alert=True)
         return
     await state.set_state(AdminStates.add_admin_user)
     await callback.message.answer(
         "Введи user_id или @username пользователя, которому выдать админку.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.add_admin_user)
@@ -3833,15 +3826,14 @@ async def admin_admins_add_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_admins_remove")
 async def admin_admins_remove(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     if not await is_general_admin(callback.from_user.id):
-        await callback.answer("Только главный админ", show_alert=True)
         return
     await state.set_state(AdminStates.remove_admin_user)
     await callback.message.answer(
         "Введи user_id или @username пользователя, у которого забрать админку.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.remove_admin_user)
@@ -3862,6 +3854,7 @@ async def admin_admins_remove_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_logs_menu")
 async def admin_logs_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="👤 Логи по user_id / @username", callback_data="admin_logs_by_user")],
@@ -3874,17 +3867,16 @@ async def admin_logs_menu(callback: CallbackQuery):
         "Можно посмотреть логи конкретного пользователя или последние действия по системе.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_logs_by_user")
 async def admin_logs_by_user(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.logs_user)
     await callback.message.answer(
         "Введи user_id или @username для просмотра логов.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.logs_user)
@@ -3916,6 +3908,7 @@ async def admin_logs_by_user_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_logs_recent")
 async def admin_logs_recent(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             """
@@ -3937,11 +3930,11 @@ async def admin_logs_recent(callback: CallbackQuery):
                 f"{row['details'] or '-'}\n\n"
             )
     await callback.message.answer(text[:4000])
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_manual_menu")
 async def admin_manual_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="➕ Выдать подписку", callback_data="admin_manual_add_sub")],
@@ -3951,21 +3944,23 @@ async def admin_manual_menu(callback: CallbackQuery):
     )
     await callback.message.answer(
         "⚙️ <b>Ручное управление</b>\n\n"
-        "Здесь можно вручную выдать подписку, снять её или отправить ссылку в канал.\n"
-        "Во всех действиях можно использовать user_id и @username.",
+        "Здесь можно вручную управлять доступом пользователя.\n\n"
+        "Выдать подписку — добавить пользователю дни доступа.\n"
+        "Снять подписку — убрать доступ и исключить из канала.\n"
+        "Выдать ссылку вручную — отправить новую ссылку в канал.\n\n"
+        "Можно использовать и user_id, и @username.",
         reply_markup=kb,
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "admin_manual_add_sub")
 async def admin_manual_add_sub(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.manual_add_sub_user)
     await callback.message.answer(
         "Введи user_id или @username пользователя.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.manual_add_sub_user)
@@ -3995,12 +3990,12 @@ async def admin_manual_add_sub_days_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_manual_remove_sub")
 async def admin_manual_remove_sub(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.manual_remove_sub_user)
     await callback.message.answer(
         "Введи user_id или @username пользователя.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.manual_remove_sub_user)
@@ -4022,12 +4017,12 @@ async def admin_manual_remove_sub_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_manual_invite")
 async def admin_manual_invite(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     await state.set_state(AdminStates.manual_invite_user)
     await callback.message.answer(
         "Введи user_id или @username пользователя, которому выдать ссылку.",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.manual_invite_user)
@@ -4046,8 +4041,8 @@ async def admin_manual_invite_finish(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "admin_guides_menu")
 async def admin_guides_menu(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
 
     await callback.message.answer(
@@ -4056,13 +4051,12 @@ async def admin_guides_menu(callback: CallbackQuery):
         "Выбери нужный раздел.",
         reply_markup=admin_guides_kb(),
     )
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("guide:"))
 async def admin_guide_open(callback: CallbackQuery):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
 
     key = callback.data.split(":", maxsplit=1)[1]
@@ -4070,17 +4064,15 @@ async def admin_guide_open(callback: CallbackQuery):
     text = guides.get(key)
 
     if not text:
-        await callback.answer("Раздел не найден", show_alert=True)
         return
 
     await callback.message.answer(text)
-    await callback.answer()
 
 
 @dp.callback_query(F.data == "guide_edit_menu")
 async def guide_edit_menu(callback: CallbackQuery, state: FSMContext):
+    await safe_callback_answer(callback)
     if not await is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
         return
     await state.set_state(AdminStates.guide_edit_pick_key)
     await callback.message.answer(
@@ -4104,7 +4096,6 @@ async def guide_edit_menu(callback: CallbackQuery, state: FSMContext):
         "<code>ads_checklist</code>",
         reply_markup=reply_back_kb(True),
     )
-    await callback.answer()
 
 
 @dp.message(AdminStates.guide_edit_pick_key)
@@ -4161,7 +4152,7 @@ async def check_subs():
         except Exception:
             logger.exception("CHECK_SUBS ERROR")
 
-        await asyncio.sleep(60)
+        await asyncio.sleep(180)
 
 
 async def check_funnel():
@@ -4210,7 +4201,7 @@ async def check_funnel():
                                 await log_action(u["user_id"], "funnel_sent", f"step={idx}")
         except Exception:
             logger.exception("CHECK_FUNNEL ERROR")
-        await asyncio.sleep(300)
+        await asyncio.sleep(600)
 
 
 async def check_renew_reminders():
@@ -4262,7 +4253,7 @@ async def check_renew_reminders():
                                 )
         except Exception:
             logger.exception("CHECK_REMINDERS ERROR")
-        await asyncio.sleep(300)
+        await asyncio.sleep(600)
 
 
 async def handle(request):
@@ -4320,12 +4311,21 @@ async def main():
     asyncio.create_task(check_funnel())
     asyncio.create_task(check_renew_reminders())
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        logger.exception("DELETE WEBHOOK ERROR: %s", e)
 
-    me = await bot.get_me()
-    logger.info("BOT = @%s (%s)", me.username, me.id)
+    try:
+        me = await bot.get_me()
+        logger.info("BOT = @%s (%s)", me.username, me.id)
+    except Exception as e:
+        logger.exception("GET_ME ERROR: %s", e)
 
-    await send_deploy_report()
+    try:
+        await send_deploy_report()
+    except Exception as e:
+        logger.exception("DEPLOY REPORT ERROR: %s", e)
 
     await dp.start_polling(
         bot,
